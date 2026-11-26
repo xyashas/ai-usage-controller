@@ -140,6 +140,31 @@ impl Engine {
         }
     }
 
+    /// Returns true once per expired web session, including across app restarts.
+    pub fn ingest_web(&mut self, res: std::result::Result<Vec<crate::model::GaugeSample>, String>) -> Result<bool> {
+        if !self.settings.claude_web { return Ok(false); }
+        let expired = self.store.kv_get("claude_web_expired")?.as_deref() == Some("1");
+        let signed_out = res.as_ref().err().is_some_and(|s| s == "signed_out");
+        if signed_out && !expired {
+            self.store.kv_set("claude_web_expired", "1")?;
+        } else if expired && res.is_ok() {
+            self.store.kv_set("claude_web_expired", "0")?;
+        }
+        if let Ok(samples) = &res {
+            for sample in samples {
+                if let Some(prev) = self.store.latest_gauge(Tool::ClaudeCode, &sample.window, sample.ts)? {
+                    if sample.used_pct > prev.used_pct && prev.resets_at == sample.resets_at
+                        && sample.ts - prev.ts <= Duration::minutes(30) {
+                        self.store.kv_set("web_activity", &sample.ts.timestamp().to_string())?;
+                        break;
+                    }
+                }
+            }
+        }
+        self.ingest_live(Tool::ClaudeCode, res);
+        Ok(signed_out && !expired && self.settings.alerts.notifications)
+    }
+
     pub fn diagnostics(&self, now: DateTime<Utc>) -> Vec<ToolDiagnostics> {
         let (day_start, day_end) = metrics::local_day_bounds(now);
         Tool::ALL
@@ -389,6 +414,21 @@ impl Engine {
             };
             let today: Vec<&UsageEvent> = recent.iter().filter(|e| e.ts >= day_start && e.ts < day_end).collect();
             let plan = ts.plan_id.as_ref().and_then(|id| self.plans.get(tool, id));
+            let reconnect = tool == Tool::ClaudeCode && self.settings.claude_web
+                && self.store.kv_get("claude_web_expired")?.as_deref() == Some("1");
+            let live_note = if tool != Tool::ClaudeCode || !ts.enabled || ts.plan_id.as_deref() == Some("api") {
+                None
+            } else if reconnect {
+                Some("Reconnect".to_owned())
+            } else if self.live_errors.contains_key(&tool) {
+                Some("Offline".to_owned())
+            } else if self.settings.claude_web || self.settings.live_gauges {
+                let last = ["five_hour", "weekly", "weekly_opus"].iter()
+                    .filter_map(|w| self.store.latest_gauge(tool, w, now).ok().flatten())
+                    .map(|g| g.ts).max();
+                last.filter(|ts| now - *ts > Duration::minutes(3))
+                    .map(|ts| format!("Updated {} min ago", (now - ts).num_minutes()))
+            } else { None };
             tools.push(ToolStatus {
                 tool,
                 label: tool.label().into(),
@@ -407,6 +447,8 @@ impl Engine {
                 burn_usd_per_min: metrics::burn_usd_per_min(&recent, now),
                 locked: false,
                 live_error: self.live_errors.get(&tool).cloned(),
+                reconnect,
+                live_note,
                 needs_connect: tool == Tool::ClaudeCode
                     && ts.enabled
                     && ts.plan_id.as_deref() != Some("api")
@@ -567,6 +609,10 @@ impl Engine {
         let savings: f64 = self.store.savings_since(metrics::month_start_local(now))?.iter().map(|s| s.amount_usd).sum();
 
         let mut snap = Snapshot {
+            idle_hidden: self.settings.onboarded && self.settings.hide_when_idle
+                && !recent_by_tool.values().flatten().any(|e| e.ts > now - Duration::minutes(30))
+                && !self.store.kv_get("web_activity")?.and_then(|s| s.parse::<i64>().ok())
+                    .is_some_and(|ts| ts > (now - Duration::minutes(30)).timestamp()),
             generated_at: now,
             onboarded: self.settings.onboarded,
             entitlements: ent.clone(),

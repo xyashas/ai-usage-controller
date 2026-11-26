@@ -15,6 +15,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -55,8 +56,18 @@ fn get_settings(state: State<AppState>) -> CmdResult<Settings> {
     Ok(state.engine.lock().map_err(err)?.settings.clone())
 }
 
+fn apply_autostart(app: &AppHandle, settings: &Settings) -> CmdResult<()> {
+    if !settings.onboarded { return Ok(()); }
+    let manager = app.autolaunch();
+    if manager.is_enabled().map_err(err)? != settings.launch_at_login {
+        if settings.launch_at_login { manager.enable() } else { manager.disable() }.map_err(err)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> CmdResult<()> {
+    apply_autostart(&app, &settings)?;
     let old_hotkey = {
         let mut eng = state.engine.lock().map_err(err)?;
         let old = eng.settings.hotkey.clone();
@@ -135,6 +146,7 @@ async fn claude_session_key(app: AppHandle, state: State<'_, AppState>, key: Str
 async fn disconnect_claude(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
     claude_web::disconnect(&app);
     let mut eng = state.engine.lock().map_err(err)?;
+    eng.store.kv_set("claude_web_expired", "0").map_err(err)?;
     eng.settings.claude_web = false;
     eng.live_errors.remove(&Tool::ClaudeCode);
     eng.save_settings().map_err(err)
@@ -289,8 +301,34 @@ fn fetch_tables(api_base: &str) -> Option<(String, String)> {
     Some((get("/v1/prices")?, get("/v1/plans")?))
 }
 
+fn update_tray(app: &AppHandle, snap: &Snapshot, tray_state: &mut Option<(String, [u8; 3])>) {
+    let tight = snap.tools.iter().filter(|t| t.enabled && !t.locked)
+        .filter_map(|t| t.headroom_pct.map(|h| (t, h))).min_by(|a,b| a.1.total_cmp(&b.1));
+    let (tip, rgb) = match tight {
+        Some((t, h)) => {
+            let rgb = match t.color.as_str() { "red" => [244, 75, 79], "amber" => [245, 174, 57], _ => [62, 199, 119] };
+            let note = t.live_note.as_ref().map(|s| format!(" ({s})")).unwrap_or_default();
+            (format!("{}: {:.0}% used{note}", t.label, 100.0 - h), rgb)
+        }
+        None => ("AI Usage Controller".to_owned(), [150, 150, 150]),
+    };
+    if tray_state.as_ref() != Some(&(tip.clone(), rgb)) {
+        if let Some(tray) = app.tray_by_id("main") {
+            let mut rgba = Vec::with_capacity(16 * 16 * 4);
+            for y in 0..16i32 { for x in 0..16i32 {
+                rgba.extend(rgb);
+                rgba.push(if (2*x-15).pow(2) + (2*y-15).pow(2) <= 196 { 255 } else { 0 });
+            }}
+            let _ = tray.set_icon(Some(tauri::image::Image::new_owned(rgba, 16, 16)));
+            let _ = tray.set_tooltip(Some(&tip));
+            *tray_state = Some((tip, rgb));
+        }
+    }
+}
+
 fn spawn_worker(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Option<Snapshot>>>) {
     std::thread::spawn(move || {
+        let mut tray_state = None;
         let mut notified: HashSet<String> = HashSet::new();
         let mut last_live = Instant::now() - LIVE_EVERY;
         let mut last_sync = Instant::now() - SYNC_EVERY;
@@ -362,6 +400,7 @@ fn spawn_worker(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Opti
                 e.snapshot(Utc::now()).ok().map(|s| (s, notifications))
             });
             if let Some((snap, notifications)) = snap {
+                update_tray(&app, &snap, &mut tray_state);
                 for a in &snap.alerts {
                     if notified.insert(a.id.clone()) && notifications {
                         let title = if a.kind == "runaway" { "Possible runaway loop" } else { "AI runway running low" };
@@ -418,6 +457,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             let _ = app.emit("toggle", ());
         }))
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(
@@ -425,6 +465,7 @@ pub fn run() {
                 .with_handler(|app, _shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
                         if let Some(w) = window::widget(app) {
+                            let _ = w.show();
                             let _ = w.set_focus();
                         }
                         let _ = app.emit("toggle", ());
@@ -482,6 +523,11 @@ pub fn run() {
                 eprintln!("hotkey {hotkey} unavailable: {e}");
             }
 
+            if let Ok(eng) = engine.lock() {
+                if let Err(e) = apply_autostart(app.handle(), &eng.settings) {
+                    eprintln!("Could not update launch at login: {e}");
+                }
+            }
             let open = MenuItem::with_id(app, "open", "Open panel", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let hide = MenuItem::with_id(app, "hide", "Hide widget", true, None::<&str>)?;
@@ -490,7 +536,15 @@ pub fn run() {
             let mut tray = TrayIconBuilder::with_id("main")
                 .tooltip("AI Usage Controller")
                 .menu(&menu)
-                .show_menu_on_left_click(true)
+                .show_menu_on_left_click(false)
+                .on_tray_icon_event(|tray, event| {
+                    use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+                    if matches!(event, TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }) {
+                        let app = tray.app_handle();
+                        if let Some(w) = window::widget(app) { let _ = w.show(); let _ = w.set_focus(); }
+                        let _ = app.emit("toggle", ());
+                    }
+                })
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "open" => {
                         if let Some(w) = window::widget(app) {

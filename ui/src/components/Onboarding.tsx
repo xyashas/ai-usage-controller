@@ -5,6 +5,7 @@ import { ClaudeConnect } from "./ClaudeConnect";
 
 // Detect installed tools → pick a plan for each → choose alert levels. Under 60 seconds.
 export function Onboarding({ onDone }: { onDone: () => void }) {
+  const [error, setError] = useState("");
   const [step, setStep] = useState(0);
   const [found, setFound] = useState<Detected[]>([]);
   const [plans, setPlans] = useState<Record<Tool, Plan[]> | null>(null);
@@ -31,12 +32,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       primary_tool: settings!.primary_tool ?? tools[0]?.tool ?? "claude_code",
     };
     for (const d of found) s.tools[d.tool] = { ...s.tools[d.tool], enabled: d.found || d.tool === "claude_code" };
-    await api.saveSettings(s);
-    onDone();
+    try { await api.saveSettings(s); onDone(); } catch (e) { setError(String(e)); }
   }
 
   return (
     <Shell>
+      {error && <p role="alert" className="text-xs text-bad">{error}</p>}
       <div className="flex gap-1">
         {[0, 1, 2].map((i) => <div key={i} className={`h-1 flex-1 rounded-full ${i <= step ? "bg-accent" : "bg-white/10"}`} />)}
       </div>

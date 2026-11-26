@@ -9,7 +9,7 @@ export function ClaudeConnect({ tool, onChanged, compact = false }: { tool?: Too
   const [showKey, setShowKey] = useState(false);
   const [key, setKey] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const expired = !!tool?.live_error;
+  const expired = !!tool?.reconnect;
 
   async function connect() {
     setErr(null);
@@ -42,7 +42,7 @@ export function ClaudeConnect({ tool, onChanged, compact = false }: { tool?: Too
           <p className="text-[13px] font-medium">{expired ? "Reconnect your Claude account" : "See your real Claude limits"}</p>
           <p className="text-[11.5px] leading-relaxed text-white/50">
             {expired
-              ? tool?.live_error
+              ? "Your claude.ai session has expired."
               : "Sign in to claude.ai once. The widget then shows the same 5-hour and weekly numbers as claude.ai, including chats in the browser and the desktop app."}
           </p>
         </div>
@@ -51,7 +51,7 @@ export function ClaudeConnect({ tool, onChanged, compact = false }: { tool?: Too
         <p className="text-[12px] text-white/70">Finish signing in in the Claude window. This panel updates within a minute.</p>
       ) : (
         <button onClick={connect} className="w-full rounded-full bg-white py-2 text-[12.5px] font-semibold text-black hover:bg-white/90">
-          {expired ? "Reconnect Claude account" : "Connect Claude account"}
+          {expired ? "Reconnect" : "Connect Claude account"}
         </button>
       )}
       {showKey ? (

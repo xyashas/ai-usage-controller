@@ -145,15 +145,16 @@ export default function App() {
   // through). Uses the shape's target size rather than measuring mid-animation,
   // so a click lands on the panel the moment it starts to open.
   const pillNow = pillSize(platform, notch);
+  const hidden = !!snap?.idle_hidden && !open;
   const targetW = open ? PANEL_W : pillNow.w;
   const targetH = open ? contentH : pillNow.h;
   useEffect(() => {
     if (!inTauri) return;
-    const send = () => api.setHitRect({ x: (window.innerWidth - targetW) / 2, y: pillNow.top, w: targetW, h: targetH });
+    const send = () => api.setHitRect({ x: (window.innerWidth - targetW) / 2, y: pillNow.top, w: hidden ? 0 : targetW, h: hidden ? 0 : targetH });
     send();
     window.addEventListener("resize", send);
     return () => window.removeEventListener("resize", send);
-  }, [targetW, targetH, pillNow.top]);
+  }, [targetW, targetH, pillNow.top, hidden]);
 
   if (!snap) return null;
 
@@ -175,7 +176,9 @@ export default function App() {
         onMouseEnter={inTauri ? undefined : () => onHoverChange(true)}
         onMouseLeave={inTauri ? undefined : () => onHoverChange(false)}
         className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && alert ? (alert.level === "red" ? "pulse-red" : "glow-amber") : ""}`}
-        style={{ top: pill.top, width: open ? PANEL_W : pill.w, height, borderRadius: radius, transform: "translateX(-50%)" }}
+        aria-hidden={hidden}
+        inert={hidden}
+        style={{ opacity: hidden ? 0 : 1, pointerEvents: hidden ? "none" : undefined, top: pill.top, width: open ? PANEL_W : pill.w, height, borderRadius: radius, transform: "translateX(-50%)" }}
       >
         <div className="pill-layer absolute inset-x-0 bottom-0" style={{ height: mac && notch ? 22 : pill.h, opacity: open ? 0 : 1 }}>
           <Collapsed snap={snap} onOpen={() => setOpen(true)} />

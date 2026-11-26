@@ -121,6 +121,20 @@ macOS universal + Windows installers uploaded as artifacts
 - macOS: window level 25 (above menu bar), all Spaces; notch height from
   `NSScreen.safeAreaInsets`.
 
+### Desktop lifecycle
+- Launch at login defaults on once onboarding is complete, including existing
+  onboarded installations. Settings controls the native autostart registration.
+- The tray dot uses the tightest visible limit's alert color. Its tooltip gives
+  the tool and percent used. Left-click toggles the panel, right-click opens the menu.
+- Claude readings older than three minutes show their age. Failed polls show
+  Offline. An expired claude.ai login shows Reconnect and triggers one system
+  notification per expiry when notifications are enabled. The expiry marker
+  survives restarts and clears after a successful web poll or disconnect.
+- Idle hiding is opt-in. After 30 minutes without tool activity, the collapsed
+  pill fades and releases its mouse hit area. A logged event, increased Claude
+  web usage, or opening the panel with the hotkey or tray brings it back.
+- Browser previews also support stale, offline, signed-out and idle scenarios.
+
 ## Gotchas already hit (don't repeat)
 - **Windows:** creating a webview or touching cookies from a *synchronous* Tauri
   command deadlocks (WebView2, wry#583). Those commands are `async`.
@@ -142,6 +156,10 @@ Verified on the owner's **Windows** PC (v0.1.1):
 - claude.ai connection works; the widget matches claude.ai → Settings → Usage (LIVE).
 - Hover open/close, pill, panel, red alert, session meter, "time left at this
   pace", Today/Priciest stats all work with real Claude Code use.
+
+Desktop lifecycle tests cover stale and offline readings, expiry recovery, and
+idle boundaries. OS login, tray interaction, notifications, and idle wake still
+need hands-on verification on Windows and macOS.
 
 Not yet verified: Mac notch placement on real hardware; Codex and Gemini parsers
 against real logs (fixtures only); runaway alert and model nudge in real use;

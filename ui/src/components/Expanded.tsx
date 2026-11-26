@@ -11,8 +11,8 @@ const tight = (t: ToolStatus) => [...t.windows].filter((w) => w.source !== "lear
 const pctText = (t: ToolStatus) => (t.color === "green" || t.color === "grey" ? "text-white" : textColor[t.color]);
 
 function SourceChip({ t }: { t: ToolStatus }) {
-  const live = t.source === "live";
-  const label = live ? "Live" : t.needs_connect ? "Not connected" : t.source === "estimate" ? "Estimate" : "Learning";
+  const live = t.source === "live" && !t.live_note;
+  const label = t.live_note ? (t.reconnect ? "Signed out" : t.live_note) : live ? "Live" : t.needs_connect ? "Not connected" : t.source === "estimate" ? "Estimate" : "Learning";
   const tip = t.live_error ?? (live ? "Read from the vendor's own usage meter" : t.source === "estimate" ? "Estimated from local logs" : "Learning your limits from usage history");
   return (
     <span title={tip} className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-0.5 text-[10.5px] font-medium text-white/60">
@@ -126,7 +126,8 @@ export function Expanded({ snap, onView, refresh }: { snap: Snapshot; onView: (v
         <p className="text-[13px] leading-relaxed text-white/60">No Claude, Codex or Gemini usage found yet. Connect your Claude account, or run one of the command-line tools once.</p>
       )}
 
-      {claude && (claude.needs_connect || claude.live_error) && <ClaudeConnect tool={claude} onChanged={refresh} />}
+      {claude?.live_note && claude !== active && !claude.reconnect && <p className="text-xs text-white/55">Claude ? {claude.live_note}</p>}
+      {claude && (claude.reconnect || (claude.needs_connect && !claude.live_note)) && <ClaudeConnect tool={claude} onChanged={refresh} />}
 
       {snap.alerts[0] && <AlertBar alert={snap.alerts[0]} onDone={refresh} />}
 

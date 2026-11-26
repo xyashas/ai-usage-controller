@@ -34,15 +34,15 @@ const UA: Option<&str> = Some("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) A
 const UA: Option<&str> = None;
 
 /// Kicks off a fetch; the result lands in `window.__aiuc` a moment later.
-const KICK_JS: &str = r#"(function(){if(window.__aiucBusy)return;window.__aiucBusy=1;(async function(){try{
-var r=await fetch('/api/organizations',{credentials:'include',headers:{'accept':'application/json'}});
-if(r.status===401||r.status===403)throw new Error('signed_out');
+const KICK_JS: &str = r#"(function(){if(location.origin!=='https://claude.ai'||window.__aiucBusy)return;window.__aiucBusy=1;(async function(){try{
+var r=await fetch('/api/organizations',{credentials:'include',signal:AbortSignal.timeout(15000),headers:{'accept':'application/json'}});
+if(new URL(r.url).pathname.startsWith('/login')||r.status===401||r.status===403)throw new Error('signed_out');
 if(!r.ok)throw new Error('organizations HTTP '+r.status);
 var orgs=await r.json();
 var org=(orgs.find(function(o){return (o.capabilities||[]).indexOf('chat')>=0})||orgs[0]);
 if(!org)throw new Error('no Claude organization on this account');
-var u=await fetch('/api/organizations/'+org.uuid+'/usage',{credentials:'include',headers:{'accept':'application/json'}});
-if(u.status===401||u.status===403)throw new Error('signed_out');
+var u=await fetch('/api/organizations/'+org.uuid+'/usage',{credentials:'include',signal:AbortSignal.timeout(15000),headers:{'accept':'application/json'}});
+if(new URL(u.url).pathname.startsWith('/login')||u.status===401||u.status===403)throw new Error('signed_out');
 if(!u.ok)throw new Error('usage HTTP '+u.status);
 window.__aiuc={ok:true,data:await u.json()};
 }catch(e){window.__aiuc={ok:false,error:String(e&&e.message||e)}}finally{window.__aiucBusy=0}})()})()"#;
@@ -161,7 +161,7 @@ pub fn spawn(app: AppHandle, state: Arc<ClaudeWeb>, engine: Arc<Mutex<Engine>>) 
             // 1. Waiting for the user to finish signing in.
             if state.signing_in.load(Ordering::SeqCst) {
                 let Some(w) = window(&app) else { continue };
-                let on_app = w.url().map(|u| !u.path().starts_with("/login") && !u.path().starts_with("/magic-link")).unwrap_or(false);
+                let on_app = w.url().map(|u| u.host_str() == Some("claude.ai") && !u.path().starts_with("/login") && !u.path().starts_with("/magic-link")).unwrap_or(false);
                 if on_app && has_session_cookie(&w) {
                     state.signing_in.store(false, Ordering::SeqCst);
                     let _ = w.hide();
@@ -193,7 +193,10 @@ pub fn spawn(app: AppHandle, state: Arc<ClaudeWeb>, engine: Arc<Mutex<Engine>>) 
                         std::thread::sleep(Duration::from_secs(4));
                         w
                     }
-                    Err(_) => continue,
+                    Err(_) => {
+                        if let Ok(mut e) = engine.lock() { let _ = e.ingest_web(Err("Claude window unavailable".into())); }
+                        continue;
+                    }
                 },
             };
             // If the parked page navigated somewhere odd, put it back.
@@ -201,34 +204,31 @@ pub fn spawn(app: AppHandle, state: Arc<ClaudeWeb>, engine: Arc<Mutex<Engine>>) 
                 let _ = w.navigate(PARK_URL.parse().unwrap());
                 std::thread::sleep(Duration::from_secs(4));
             }
-            let _ = w.eval("window.__aiuc=null;");
-            let _ = w.eval(KICK_JS);
-            std::thread::sleep(Duration::from_secs(4));
-            let eng = engine.clone();
-            let _ = w.eval_with_callback(READ_JS, move |raw| {
-                let Some(v) = parse_read(&raw) else { return };
-                if v.is_null() {
-                    return; // still loading; next round
-                }
-                let res = if v.get("ok").and_then(|o| o.as_bool()) == Some(true) {
-                    let g = aiuc_core::live::parse_claude_usage_from(v.get("data").unwrap_or(&Value::Null), Utc::now(), "claude_web");
-                    if g.is_empty() {
-                        Err("claude.ai returned no usage numbers".to_string())
-                    } else {
-                        Ok(g)
-                    }
-                } else {
-                    let e = v.get("error").and_then(|e| e.as_str()).unwrap_or("unknown error");
-                    Err(if e == "signed_out" {
-                        "Signed out of claude.ai. Reconnect your Claude account.".to_string()
-                    } else {
-                        format!("claude.ai: {e}")
-                    })
-                };
-                if let Ok(mut e) = eng.lock() {
-                    e.ingest_live(Tool::ClaudeCode, res);
-                }
-            });
+            let res = poll(&w);
+            let send = engine.lock().ok().and_then(|mut e| e.ingest_web(res).ok()).unwrap_or(false);
+            if send {
+                super::notify(&app, "Claude signed out", "Open the widget and choose Reconnect.");
+            }
         }
     });
+}
+
+fn poll(w: &WebviewWindow) -> Result<Vec<aiuc_core::model::GaugeSample>, String> {
+    w.eval("window.__aiuc=null").map_err(|e| e.to_string())?;
+    w.eval(KICK_JS).map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(35);
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_secs(1));
+        let (tx, rx) = std::sync::mpsc::channel();
+        w.eval_with_callback(READ_JS, move |raw| { let _ = tx.send(parse_read(&raw)); })
+            .map_err(|e| e.to_string())?;
+        let Some(v) = rx.recv_timeout(Duration::from_secs(3)).ok().flatten() else { continue };
+        if v.is_null() { continue; }
+        if v["ok"] != true {
+            return Err(v["error"].as_str().unwrap_or("Claude unavailable").to_owned());
+        }
+        let gauges = aiuc_core::live::parse_claude_usage_from(&v["data"], Utc::now(), "claude_web");
+        return if gauges.is_empty() { Err("Claude returned no usage numbers".into()) } else { Ok(gauges) };
+    }
+    Err("Claude did not respond".into())
 }

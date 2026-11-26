@@ -565,3 +565,49 @@ fn claude_web_gauge_shows_plan_usage_without_claude_code_logs() {
     eng.ingest_live(Tool::ClaudeCode, Err("signed out".into()));
     assert_eq!(eng.diagnostics(now)[0].live_error.as_deref(), Some("signed out"));
 }
+
+#[test]
+fn claude_poll_health_distinguishes_age_network_and_session_expiry() {
+    let now = t("2026-11-26T12:00:00Z");
+    let mut eng = Engine::in_memory().unwrap();
+    eng.settings.claude_web = true;
+    let gauge = |ts| aiuc_core::live::parse_claude_usage_from(
+        &serde_json::json!({"five_hour": {"utilization": 50, "resets_at": "2026-11-26T14:00:00Z"}}),
+        ts, "claude_web");
+    let note = |eng: &mut Engine, ts| eng.snapshot(ts).unwrap().tools.into_iter()
+        .find(|s| s.tool == Tool::ClaudeCode).unwrap().live_note;
+    assert!(!eng.ingest_web(Ok(gauge(now))).unwrap());
+    assert_eq!(note(&mut eng, now + Duration::minutes(3)), None);
+    assert_eq!(note(&mut eng, now + Duration::minutes(5)).as_deref(), Some("Updated 5 min ago"));
+    assert!(!eng.ingest_web(Err("network error".into())).unwrap());
+    assert_eq!(note(&mut eng, now).as_deref(), Some("Offline"));
+    assert!(eng.ingest_web(Err("signed_out".into())).unwrap());
+    eng.live_errors.clear(); // A new process loses transient errors.
+    assert_eq!(note(&mut eng, now).as_deref(), Some("Reconnect"));
+    assert!(!eng.ingest_web(Err("signed_out".into())).unwrap());
+    eng.ingest_web(Ok(gauge(now))).unwrap();
+    assert_eq!(note(&mut eng, now), None);
+    assert!(eng.ingest_web(Err("signed_out".into())).unwrap());
+}
+
+#[test]
+fn idle_pill_uses_logged_activity_and_increases_in_web_usage() {
+    let now = t("2026-11-26T12:00:00Z");
+    let mut eng = engine_with(vec![ev(Tool::Gemini, EventKind::Assistant, now, "session", 0.1)], vec![]);
+    let legacy: aiuc_core::settings::Settings = serde_json::from_str("{}").unwrap();
+    assert!(legacy.launch_at_login && !legacy.hide_when_idle);
+    eng.settings.onboarded = true;
+    eng.settings.hide_when_idle = true;
+    assert!(!eng.snapshot(now + Duration::minutes(29)).unwrap().idle_hidden);
+    let later = now + Duration::minutes(30);
+    assert!(eng.snapshot(later).unwrap().idle_hidden);
+    eng.settings.claude_web = true;
+    for (offset, pct, hidden) in [(0, 10, true), (1, 10, true), (2, 11, false)] {
+        let ts = later + Duration::minutes(offset);
+        let gauges = aiuc_core::live::parse_claude_usage_from(
+            &serde_json::json!({"five_hour":{"utilization":pct,"resets_at":"2026-11-26T15:00:00Z"}}), ts, "claude_web");
+        eng.ingest_web(Ok(gauges)).unwrap();
+        assert_eq!(eng.snapshot(ts).unwrap().idle_hidden, hidden);
+    }
+    assert!(eng.snapshot(later + Duration::minutes(32)).unwrap().idle_hidden);
+}

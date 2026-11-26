@@ -34,6 +34,8 @@ export interface ToolStatus {
   today_requests: number;
   burn_usd_per_min: number;
   locked: boolean;
+  reconnect: boolean;
+  live_note: string | null;
   live_error: string | null;
   needs_connect: boolean;
 }
@@ -58,6 +60,7 @@ export interface AuditResult { tool: Tool; current_plan: string; current_price: 
 export interface Entitlements { tier: Tier; trial_ends_at: string | null; trial_available: boolean; licence_status: string | null; max_devices: number }
 
 export interface Snapshot {
+  idle_hidden: boolean;
   generated_at: string;
   onboarded: boolean;
   entitlements: Entitlements;
@@ -81,6 +84,8 @@ export interface Settings {
   tools: Record<Tool, ToolSettings>;
   primary_tool: Tool | null;
   alerts: { amber_pct: number; red_pct: number; runaway_alerts: boolean; one_click_stop: boolean; notifications: boolean };
+  launch_at_login: boolean;
+  hide_when_idle: boolean;
   hotkey: string;
   sync: { enabled: boolean; server_url: string | null; device_token: string | null; device_id: string | null };
   live_gauges: boolean;

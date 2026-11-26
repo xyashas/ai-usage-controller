@@ -33,7 +33,7 @@ pub struct Rect {
 
 impl Rect {
     pub fn contains(&self, x: f64, y: f64) -> bool {
-        x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
+        self.w > 0.0 && self.h > 0.0 && x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
     }
 }
 

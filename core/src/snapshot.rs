@@ -28,6 +28,8 @@ pub struct ToolStatus {
     pub burn_usd_per_min: f64,
     /// True when hidden behind the Pro paywall.
     pub locked: bool,
+    pub reconnect: bool,
+    pub live_note: Option<String>,
     pub live_error: Option<String>,
     /// Claude only: no fresh plan gauge, so numbers are estimates from Claude Code
     /// logs (which miss claude.ai and desktop-app use). The UI offers to connect.
@@ -102,6 +104,7 @@ pub struct Alert {
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub generated_at: DateTime<Utc>,
+    pub idle_hidden: bool,
     pub onboarded: bool,
     pub entitlements: Entitlements,
     pub active_tool: Option<Tool>,

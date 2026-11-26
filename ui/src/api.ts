@@ -82,6 +82,8 @@ let mockSettings: Settings = {
   },
   primary_tool: "claude_code",
   alerts: { amber_pct: 20, red_pct: 5, runaway_alerts: true, one_click_stop: false, notifications: true },
+  launch_at_login: true,
+  hide_when_idle: false,
   hotkey: "Alt+A",
   sync: { enabled: false, server_url: null, device_token: null, device_id: null },
   live_gauges: true,
@@ -97,10 +99,12 @@ function mockSnapshot(): Snapshot {
   const tool = (tool: Tool, label: string, left: number, extra: Partial<Snapshot["tools"][0]> = {}): Snapshot["tools"][0] => ({
     tool, label, detected: true, enabled: true, plan_id: null, plan_name: null,
     headroom_pct: left, color: left <= 5 ? "red" : left <= 20 ? "amber" : "green", source: "live",
-    windows: [], minutes_left: null, active: false, today_cost_usd: 0, today_requests: 0, burn_usd_per_min: 0, locked: false, live_error: null, needs_connect: false, ...extra,
+    windows: [], minutes_left: null, active: false, today_cost_usd: 0, today_requests: 0, burn_usd_per_min: 0, locked: false, reconnect: false, live_note: null, live_error: null, needs_connect: false, ...extra,
   });
   const tools = [
     tool("claude_code", "Claude", mockScenario === "unconnected" ? 100 : claudeLeft, {
+      reconnect: mockScenario === "signed-out",
+      live_note: ({ stale: "Updated 5 min ago", offline: "Offline", "signed-out": "Reconnect" } as Record<string, string>)[mockScenario ?? ""] ?? null,
       ...(mockScenario === "unconnected" ? { needs_connect: true, source: "estimate" as const } : {}),
       plan_name: "Claude Max 5x", active: true, minutes_left: paid ? 20 : null, today_cost_usd: 18.42, today_requests: 212, burn_usd_per_min: 0.31,
       windows: mockScenario === "unconnected" ? [] : [
@@ -123,6 +127,7 @@ function mockSnapshot(): Snapshot {
   if (claudeLeft <= 20)
     alerts.push({ id: `low:${claudeLeft <= 5 ? "red" : "amber"}`, level: claudeLeft <= 5 ? "red" : "amber", kind: "low_headroom", tool: "claude_code", message: `Claude 5-hour limit ${Math.round(100 - claudeLeft)}% used, about 20 min left at this pace`, action: paid ? { kind: "switch", label: "Switch to Codex", target_tool: "codex" } : { kind: "dismiss", label: "Dismiss", target_tool: null }, session_id: null, project: null, burn_usd_per_min: null });
   return {
+    idle_hidden: mockSettings.hide_when_idle && mockScenario === "idle",
     generated_at: now().toISOString(),
     onboarded: mockSettings.onboarded,
     entitlements: { tier: mockTier, trial_ends_at: mockTier === "trial" ? inMin(60 * 24 * 5) : null, trial_available: mockTier === "free", licence_status: null, max_devices: 2 },

@@ -12,6 +12,7 @@ const TOOLS: { tool: Tool; label: string }[] = [
 export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snapshot; onBack: () => void; onPaywall: () => void; onSetup: () => void }) {
   const [s, setS] = useState<Settings | null>(null);
   const [plans, setPlans] = useState<Record<Tool, Plan[]> | null>(null);
+  const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false);
   const [invite, setInvite] = useState({ server: "", code: "", email: "" });
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
@@ -30,8 +31,9 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
   const tool = (t: Tool, patch: Partial<Settings["tools"][Tool]>) => update({ ...s, tools: { ...s.tools, [t]: { ...s.tools[t], ...patch } } });
 
   async function save() {
-    await api.saveSettings(s!);
-    setSaved(true);
+    setSaveError("");
+    try { await api.saveSettings(s!); setSaved(true); }
+    catch (e) { setSaveError(String(e)); }
   }
 
   async function join() {
@@ -107,7 +109,11 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         {!paid && <button onClick={onPaywall} className="text-left text-[12px] text-accent">Custom alert levels are Pro →</button>}
       </Section>
 
-      <Section title="Hotkey">
+      <Section title="Widget">
+        <Toggle label="Launch at login" on={s.launch_at_login} set={(v) => update({ ...s, launch_at_login: v })} />
+        <Toggle label="Hide pill when no AI tool has been used for 30 min" on={s.hide_when_idle} set={(v) => update({ ...s, hide_when_idle: v })} />
+        {saveError && <p role="alert" className="text-xs text-bad">{saveError}</p>}
+
         <Row label="Open panel">
           <input onFocus={() => api.focus()} value={s.hotkey} onChange={(e) => update({ ...s, hotkey: e.target.value })} className="w-28 rounded-md bg-white/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-white/[0.08]" />
         </Row>

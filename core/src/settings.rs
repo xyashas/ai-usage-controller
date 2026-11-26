@@ -55,6 +55,8 @@ pub struct SyncSettings {
 #[serde(default)]
 pub struct Settings {
     pub onboarded: bool,
+    pub launch_at_login: bool,
+    pub hide_when_idle: bool,
     pub tools: BTreeMap<Tool, ToolSettings>,
     /// The single tool a Free user tracks.
     pub primary_tool: Option<Tool>,
@@ -76,6 +78,8 @@ impl Default for Settings {
         }
         Settings {
             onboarded: false,
+            launch_at_login: true,
+            hide_when_idle: false,
             tools,
             primary_tool: None,
             alerts: AlertSettings::default(),

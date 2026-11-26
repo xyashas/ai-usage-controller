@@ -1,4 +1,5 @@
 import type { Snapshot } from "../types";
+import { api } from "../api";
 import { UsageBar } from "./UsageBar";
 import { countdown, textColor, usedPct } from "../format";
 
@@ -9,13 +10,17 @@ export function Collapsed({ snap, onOpen }: { snap: Snapshot; onOpen: () => void
   const binding = t ? [...t.windows].filter((w) => w.source !== "learning").sort((a, b) => a.headroom_pct - b.headroom_pct)[0] : undefined;
   const used = usedPct(t?.headroom_pct);
   const reset = countdown(binding?.resets_at ?? null);
+  const claude = snap.tools.find((x) => x.tool === "claude_code" && x.enabled);
+  const note = claude?.live_note;
   const setup = !snap.onboarded;
   const connect = t?.needs_connect && (t.today_requests === 0 || used == null);
 
   return (
-    <button onClick={onOpen} className="flex h-full w-full items-center gap-2.5 px-4 text-left" aria-label="Open AI usage panel">
+    <button title={note ? `Claude: ${note}` : undefined} onClick={claude?.reconnect ? () => { api.connectClaude().catch(onOpen); } : onOpen} className="flex h-full w-full items-center gap-2.5 px-4 text-left" aria-label={claude?.reconnect ? "Reconnect Claude account" : "Open AI usage panel"}>
       {setup || !t ? (
         <span className="flex-1 text-center text-[11.5px] font-medium text-white/70">{setup ? "Finish setup" : "No AI tools found"}</span>
+      ) : note ? (
+        <><span className="text-[11.5px] text-white/75">Claude</span><span className="flex-1 text-right text-[11px] text-white/55">{note}</span></>
       ) : connect ? (
         <>
           <span className="text-[11.5px] font-medium text-white/80">{t.label}</span>
