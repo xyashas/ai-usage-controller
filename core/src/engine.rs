@@ -573,6 +573,10 @@ impl Engine {
             active_tool,
             tools,
             today,
+            handoff_session: recent_by_tool[&Tool::ClaudeCode].iter().rev()
+                .find(|e| e.ts <= now && e.ts >= now - Duration::hours(2))
+                .map(|e| e.session_id.clone()),
+            codex_installed: false,
             session_meter,
             alerts,
             nudge,
@@ -584,6 +588,11 @@ impl Engine {
         };
         if !ent.paid() {
             self.apply_free_limits(&mut snap);
+        }
+        if !snap.tools.iter().any(|t| t.tool == Tool::ClaudeCode && t.enabled && t.headroom_pct.is_some_and(|p| p <= 10.0)) {
+            snap.handoff_session = None;
+        } else if snap.handoff_session.is_some() {
+            snap.codex_installed = crate::handoff::codex_path().is_some();
         }
         Ok(snap)
     }
