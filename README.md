@@ -78,6 +78,16 @@ npm ci --prefix web && npm run dev --prefix web      # :3000  (/calculator, /das
 
 Installers: `cd app && npx tauri build` (add `--target universal-apple-darwin` on a Mac). Signed releases come from the `Release` workflow; see [docs/RELEASING.md](docs/RELEASING.md).
 
+## Check that it works
+
+Open the panel, then the pulse icon (**Check setup**). It shows, for each tool, where the numbers come from, how many requests it saw today, when it last updated, and what to compare against:
+
+- **Claude:** claude.ai → Settings → Usage (or `/usage` in Claude Code). If you use claude.ai or the desktop app, press **Connect Claude account** and sign in once; the widget then reads the same plan limits claude.ai shows.
+- **Codex:** `/status` inside Codex.
+- **Gemini:** `/stats` inside Gemini CLI.
+
+**Copy details** puts a diagnostics report on the clipboard for bug reports.
+
 ## Tests
 
 ```bash
@@ -90,7 +100,7 @@ CI runs the core tests on Linux, macOS and Windows and builds unsigned Mac (univ
 
 ## How the numbers work
 
-- **Headroom** = 1 − used ÷ allowance for each window; the bar shows the tightest window. Sources, best first: the vendor's own gauge (Codex writes `rate_limits` into its logs; Claude's `/usage` gauge is read with the Claude Code login, best effort), a calibrated allowance learned from past live readings, your own historical peak window. With none of those the tool shows **Learning** instead of guessing.
+- **Usage** is shown as percent of the limit used, like Claude's and Codex's own screens; the bar shows the tightest window. Sources, best first: the vendor's own gauge (Codex writes `rate_limits` into its logs; Claude's limits come from claude.ai when you connect your account, or from the Claude Code login, best effort), a calibrated allowance learned from past live readings, your own historical peak window. With none of those the tool shows **Learning** instead of guessing.
 - **Time to cutoff** uses a rolling 15-minute burn rate, shows only while a session is active, and rounds to 5 minutes.
 - **Runaway**: last-5-minute spend > 4× your normal 5-minute average, ≥10 agent turns with no user message, and most turns repeat the same files or tool calls. Alert-only by default; one-click Stop (sends Ctrl-C to that session's process, Mac/Linux) is a setting, off until thresholds are tuned on beta data.
 - **Costs** are API-list-price estimates from `core/data/prices.json`. On a subscription they measure allowance used, not money. Savings are always labelled "est."

@@ -16,8 +16,9 @@
   html, body, #root { margin: 0; height: 100%; background: transparent; overflow: hidden; }
   body { font-family: var(--font-sans); color: #ececf1; -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
   /* The browser preview (npm run dev) gets a backdrop so the widget is visible. */
-  body.preview { background: #2a2a33; }
+  body.preview { background: linear-gradient(#3a3a46, #24242c); }
   button { cursor: pointer; }
+  input[type="checkbox"] { accent-color: #8b8bff; }
   select option { background: #141419; }
 }
 @utility tabular { font-variant-numeric: tabular-nums; }
@@ -26,5 +27,24 @@
 @keyframes glow-amber { 0%, 100% { box-shadow: 0 0 6px 0 rgba(251,191,36,0.35); } 50% { box-shadow: 0 0 10px 1px rgba(251,191,36,0.55); } }
 .pulse-red { animation: pulse-red 1.2s ease-in-out infinite; }
 .glow-amber { animation: glow-amber 2.4s ease-in-out infinite; }
+/* The widget: one black surface that morphs between the pill and the panel. */
+.surface {
+  background: #000;
+  color: #f4f4f6;
+  transition:
+    width 380ms cubic-bezier(0.32, 0.72, 0, 1),
+    height 380ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 380ms cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 300ms ease;
+  will-change: width, height;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.surface.is-open { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.55); }
+.pill-layer { transition: opacity 140ms ease; }
+.surface.is-open .pill-layer { pointer-events: none; }
+.panel-layer { transition: opacity 120ms ease; scrollbar-width: none; }
+.surface.is-open .panel-layer { transition: opacity 220ms ease 90ms; }
+.panel-layer::-webkit-scrollbar { display: none; }
 .fade-in { animation: fade-in 160ms ease-out; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .surface, .pill-layer, .panel-layer { transition: none !important; } }

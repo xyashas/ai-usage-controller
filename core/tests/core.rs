@@ -530,3 +530,38 @@ fn parsers_report_versions() {
     let _ = ParsedItem::Event; // public API sanity
 }
 
+
+#[test]
+fn claude_web_gauge_shows_plan_usage_without_claude_code_logs() {
+    // claude.ai / desktop-app users have no local logs; the web gauge alone must drive the bar.
+    let now = t("2026-11-26T12:00:00Z");
+    let mut eng = Engine::in_memory().unwrap();
+    eng.settings.claude_web = true;
+    eng.settings.onboarded = true;
+    let before = eng.snapshot(now).unwrap();
+    let c = before.tools.iter().find(|x| x.tool == Tool::ClaudeCode).unwrap();
+    assert!(c.detected, "a connected claude.ai account counts as detected");
+    assert!(c.needs_connect, "no gauge yet, so no real numbers");
+
+    let v = serde_json::json!({
+        "five_hour": {"utilization": 73.0, "resets_at": "2026-11-26T14:00:00Z"},
+        "seven_day": {"utilization": 30.0, "resets_at": "2026-11-30T09:00:00Z"}
+    });
+    let g = aiuc_core::live::parse_claude_usage_from(&v, now, "claude_web");
+    eng.ingest_live(Tool::ClaudeCode, Ok(g));
+    let s = eng.snapshot(now).unwrap();
+    let c = s.tools.iter().find(|x| x.tool == Tool::ClaudeCode).unwrap();
+    assert_eq!(c.source, Source::Live);
+    assert!(!c.needs_connect);
+    assert!((c.headroom_pct.unwrap() - 27.0).abs() < 1e-9, "73% used = 27% headroom");
+    let five = c.windows.iter().find(|w| w.key == "five_hour").unwrap();
+    assert_eq!(five.resets_at, Some(t("2026-11-26T14:00:00Z")));
+
+    let d = eng.diagnostics(now);
+    let dc = d.iter().find(|x| x.tool == Tool::ClaudeCode).unwrap();
+    assert_eq!(dc.gauge_source.as_deref(), Some("claude_web"));
+    assert_eq!(dc.gauge_used_pct, Some(73.0));
+
+    eng.ingest_live(Tool::ClaudeCode, Err("signed out".into()));
+    assert_eq!(eng.diagnostics(now)[0].live_error.as_deref(), Some("signed out"));
+}

@@ -124,6 +124,52 @@ impl Engine {
     pub fn detected(&self, tool: Tool) -> bool {
         (self.detect_fs && !crate::paths::detect(tool, &self.settings.tool(tool).extra_roots).is_empty())
             || self.store.has_events(tool).unwrap_or(false)
+            || (tool == Tool::ClaudeCode && (self.settings.claude_web || self.store.has_gauges(tool).unwrap_or(false)))
+    }
+
+    /// Record the result of a live-gauge poll (Claude Code login or claude.ai).
+    pub fn ingest_live(&mut self, tool: Tool, res: std::result::Result<Vec<crate::model::GaugeSample>, String>) {
+        match res {
+            Ok(g) => {
+                self.live_errors.remove(&tool);
+                let _ = self.store.insert_gauges(&g);
+            }
+            Err(e) => {
+                self.live_errors.insert(tool, e);
+            }
+        }
+    }
+
+    pub fn diagnostics(&self, now: DateTime<Utc>) -> Vec<ToolDiagnostics> {
+        let (day_start, day_end) = metrics::local_day_bounds(now);
+        Tool::ALL
+            .iter()
+            .map(|&tool| {
+                let checked = self.roots(tool);
+                let found = crate::paths::detect(tool, &self.settings.tool(tool).extra_roots);
+                let (total, last) = self.store.event_stats(tool).unwrap_or((0, None));
+                let today = self
+                    .store
+                    .events(Some(tool), day_start, day_end)
+                    .map(|v| v.iter().filter(|e| e.kind == EventKind::Assistant).count() as u64)
+                    .unwrap_or(0);
+                let window = if tool == Tool::Gemini { "daily" } else { "five_hour" };
+                let g = self.store.latest_gauge(tool, window, now).ok().flatten();
+                ToolDiagnostics {
+                    tool,
+                    label: tool.label().into(),
+                    folders_found: found.iter().map(|p| p.display().to_string()).collect(),
+                    folders_checked: checked.iter().map(|p| p.display().to_string()).collect(),
+                    requests_total: total,
+                    requests_today: today,
+                    last_request_at: last,
+                    gauge_source: g.as_ref().map(|g| g.source.clone()),
+                    gauge_at: g.as_ref().map(|g| g.ts),
+                    gauge_used_pct: g.as_ref().map(|g| g.used_pct),
+                    live_error: self.live_errors.get(&tool).cloned(),
+                }
+            })
+            .collect()
     }
 
     pub fn scan(&mut self) -> Result<ScanReport> {
@@ -150,15 +196,8 @@ impl Engine {
         if self.settings.tool(Tool::ClaudeCode).plan_id.as_deref() == Some("api") {
             return;
         }
-        match crate::live::fetch_claude_gauges(now) {
-            Ok(g) => {
-                self.live_errors.remove(&Tool::ClaudeCode);
-                let _ = self.store.insert_gauges(&g);
-            }
-            Err(e) => {
-                self.live_errors.insert(Tool::ClaudeCode, e.to_string());
-            }
-        }
+        let res = crate::live::fetch_claude_gauges(now).map_err(|e| e.to_string());
+        self.ingest_live(Tool::ClaudeCode, res);
     }
 
     // ---------- allowances ----------
@@ -368,6 +407,10 @@ impl Engine {
                 burn_usd_per_min: metrics::burn_usd_per_min(&recent, now),
                 locked: false,
                 live_error: self.live_errors.get(&tool).cloned(),
+                needs_connect: tool == Tool::ClaudeCode
+                    && ts.enabled
+                    && ts.plan_id.as_deref() != Some("api")
+                    && source != Source::Live,
             });
             recent_by_tool.insert(tool, recent);
         }
@@ -496,8 +539,8 @@ impl Engine {
             };
             let window_label = w.map(|w| w.label.to_lowercase()).unwrap_or_default();
             let msg = match t.minutes_left {
-                Some(m) => format!("{} {}: {:.0}% left, about {} min at this pace", t.label, window_label, h, m),
-                None => format!("{} {}: {:.0}% left", t.label, window_label, h),
+                Some(m) => format!("{} {} limit {:.0}% used, about {} min left at this pace", t.label, window_label, 100.0 - h, m),
+                None => format!("{} {} limit {:.0}% used", t.label, window_label, 100.0 - h),
             };
             alerts.push(Alert {
                 id,

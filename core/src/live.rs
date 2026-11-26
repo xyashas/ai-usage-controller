@@ -53,6 +53,13 @@ pub fn claude_access_token() -> Result<String> {
 }
 
 pub fn parse_claude_usage(v: &Value, now: DateTime<Utc>) -> Vec<GaugeSample> {
+    parse_claude_usage_from(v, now, "claude_oauth")
+}
+
+/// The same shape is served to Claude Code (`/api/oauth/usage`) and to claude.ai
+/// (`/api/organizations/<org>/usage`); both report the plan-wide limits that
+/// claude.ai chats, the desktop app and Claude Code share.
+pub fn parse_claude_usage_from(v: &Value, now: DateTime<Utc>, source: &str) -> Vec<GaugeSample> {
     let mut out = Vec::new();
     for (field, window, minutes) in [
         ("five_hour", "five_hour", 300u32),
@@ -68,10 +75,15 @@ pub fn parse_claude_usage(v: &Value, now: DateTime<Utc>) -> Vec<GaugeSample> {
             resets_at: crate::parsers::parse_ts(g.get("resets_at")),
             window_minutes: Some(minutes),
             ts: now,
-            source: "claude_oauth".into(),
+            source: source.into(),
         });
     }
     out
+}
+
+/// True when a Claude Code OAuth login exists on this machine (it may be expired).
+pub fn has_claude_code_login() -> bool {
+    claude_credentials_json().is_ok()
 }
 
 pub fn fetch_claude_gauges(now: DateTime<Utc>) -> Result<Vec<GaugeSample>> {

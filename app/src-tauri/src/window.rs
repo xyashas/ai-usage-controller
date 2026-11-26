@@ -1,18 +1,40 @@
-//! Widget window placement. Mac: hangs from the notch (or the menu bar on Macs
-//! without one), floating above the menu bar. Windows: a pill at top centre.
+//! Widget window. One transparent, always-on-top window that never resizes:
+//! the pill and the panel are drawn inside it and animate with CSS, so opening
+//! and closing is smooth. The window lets clicks pass through everywhere except
+//! the shape the UI reports (see `hover.rs`), so the transparent area never
+//! blocks the apps underneath.
+//!
+//! Mac: the pill hangs from the notch (or the menu bar on Macs without one).
+//! Windows: a pill at top centre.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{LogicalPosition, LogicalSize, Manager, Runtime, WebviewWindow};
 
-pub const EXPANDED: (f64, f64) = (380.0, 480.0);
-const WIN_TOP_GAP: f64 = 6.0;
+/// The window's fixed size. The panel is at most 380×560; the extra leaves room
+/// for its shadow.
+pub const WINDOW: (f64, f64) = (420.0, 600.0);
 
 #[derive(Clone, Serialize)]
 pub struct Layout {
     pub platform: &'static str,
     pub notch_height: f64,
-    pub collapsed: (f64, f64),
-    pub expanded: (f64, f64),
+    pub window: (f64, f64),
+}
+
+/// The part of the window that takes the mouse, in CSS pixels from the window's
+/// top-left corner. Everything else is click-through.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Rect {
+    pub fn contains(&self, x: f64, y: f64) -> bool {
+        x >= self.x && x <= self.x + self.w && y >= self.y && y <= self.y + self.h
+    }
 }
 
 pub fn platform() -> &'static str {
@@ -39,14 +61,7 @@ fn notch_height() -> f64 {
 }
 
 pub fn layout() -> Layout {
-    let notch = notch_height();
-    let collapsed = match platform() {
-        // Notch Macs: the bar sits just under the camera housing, blending into it.
-        "macos" if notch > 0.0 => (220.0, notch + 16.0),
-        "macos" => (210.0, 24.0),
-        _ => (230.0, 34.0),
-    };
-    Layout { platform: platform(), notch_height: notch, collapsed, expanded: EXPANDED }
+    Layout { platform: platform(), notch_height: notch_height(), window: WINDOW }
 }
 
 /// Float above the menu bar on every Space, including full-screen apps.
@@ -69,16 +84,9 @@ pub fn mac_float<R: Runtime>(win: &WebviewWindow<R>) {
 #[cfg(not(target_os = "macos"))]
 pub fn mac_float<R: Runtime>(_win: &WebviewWindow<R>) {}
 
-/// Resize and re-centre the widget for the given mode. `height` lets the panel
-/// fit its content (clamped), so a quiet day doesn't show an empty box.
-pub fn apply<R: Runtime>(win: &WebviewWindow<R>, expanded: bool, height: Option<f64>) -> tauri::Result<()> {
-    let l = layout();
-    let (w, mut h) = if expanded { l.expanded } else { l.collapsed };
-    if expanded {
-        if let Some(fit) = height {
-            h = fit.clamp(180.0, 560.0);
-        }
-    }
+/// Size the window and pin it to the top centre of its monitor.
+pub fn place<R: Runtime>(win: &WebviewWindow<R>) -> tauri::Result<()> {
+    let (w, h) = WINDOW;
     let monitor = win.current_monitor()?.or(win.primary_monitor()?);
     let (mx, my, mw) = match &monitor {
         Some(m) => {
@@ -87,9 +95,8 @@ pub fn apply<R: Runtime>(win: &WebviewWindow<R>, expanded: bool, height: Option<
         }
         None => (0.0, 0.0, 1440.0),
     };
-    let y = my + if l.platform == "macos" { 0.0 } else { WIN_TOP_GAP };
     win.set_size(LogicalSize::new(w, h))?;
-    win.set_position(LogicalPosition::new(mx + (mw - w) / 2.0, y))?;
+    win.set_position(LogicalPosition::new(mx + (mw - w) / 2.0, my))?;
     Ok(())
 }
 

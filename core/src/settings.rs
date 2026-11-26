@@ -63,6 +63,8 @@ pub struct Settings {
     pub sync: SyncSettings,
     /// Read Claude's live 5-hour/weekly gauges with the Claude Code login (unofficial, best-effort).
     pub live_gauges: bool,
+    /// Signed in to claude.ai inside the app, so the plan gauge works without Claude Code.
+    pub claude_web: bool,
     pub api_base: String,
 }
 
@@ -80,6 +82,7 @@ impl Default for Settings {
             hotkey: "Alt+A".into(),
             sync: SyncSettings::default(),
             live_gauges: true,
+            claude_web: false,
             api_base: "https://api.aiusage.dev".into(),
         }
     }

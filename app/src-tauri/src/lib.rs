@@ -1,3 +1,5 @@
+mod claude_web;
+mod hover;
 mod window;
 
 use aiuc_core::model::Tool;
@@ -20,10 +22,13 @@ const TICK: Duration = Duration::from_secs(3);
 const LIVE_EVERY: Duration = Duration::from_secs(60);
 const SYNC_EVERY: Duration = Duration::from_secs(60);
 const TABLES_EVERY: Duration = Duration::from_secs(6 * 3600);
+static CLAUDE_CODE_LOGIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 struct AppState {
     engine: Arc<Mutex<Engine>>,
     last: Arc<Mutex<Option<Snapshot>>>,
+    hit: Arc<Mutex<window::Rect>>,
+    web: Arc<claude_web::ClaudeWeb>,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -98,11 +103,76 @@ fn detect_tools(state: State<AppState>) -> CmdResult<Vec<Detected>> {
         .collect())
 }
 
+/// The UI reports the shape that should take the mouse (pill or panel).
 #[tauri::command]
-fn set_mode(app: AppHandle, mode: String, height: Option<f64>) -> CmdResult<()> {
-    let win = window::widget(&app).ok_or("no widget window")?;
-    window::apply(&win, mode == "expanded", height).map_err(err)?;
+fn set_hit_rect(state: State<AppState>, rect: window::Rect) -> CmdResult<()> {
+    *state.hit.lock().map_err(err)? = rect;
     Ok(())
+}
+
+/// Give the widget keyboard focus (for typing in Settings).
+#[tauri::command]
+fn focus_widget(app: AppHandle) -> CmdResult<()> {
+    window::widget(&app).ok_or("no widget window")?.set_focus().map_err(err)
+}
+
+// The Claude commands are async: on Windows, creating a webview or touching its
+// cookies from a synchronous command deadlocks (WebView2, wry#583).
+#[tauri::command]
+async fn connect_claude(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    claude_web::open_login(&app, &state.web).map_err(err)
+}
+
+#[tauri::command]
+async fn claude_session_key(app: AppHandle, state: State<'_, AppState>, key: String) -> CmdResult<()> {
+    claude_web::use_session_key(&app, &state.web, &key)?;
+    let mut eng = state.engine.lock().map_err(err)?;
+    eng.settings.claude_web = true;
+    eng.save_settings().map_err(err)
+}
+
+#[tauri::command]
+async fn disconnect_claude(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    claude_web::disconnect(&app);
+    let mut eng = state.engine.lock().map_err(err)?;
+    eng.settings.claude_web = false;
+    eng.live_errors.remove(&Tool::ClaudeCode);
+    eng.save_settings().map_err(err)
+}
+
+/// Re-read logs and gauges now (the "Check setup" screen's refresh button).
+#[tauri::command]
+fn refresh_now(state: State<AppState>) -> CmdResult<()> {
+    state.web.poll_now.store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut eng = state.engine.lock().map_err(err)?;
+    eng.scan().map_err(err)?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct Diagnostics {
+    app_version: &'static str,
+    platform: &'static str,
+    data_dir: String,
+    claude_web: bool,
+    claude_code_login: bool,
+    signing_in: bool,
+    tools: Vec<aiuc_core::snapshot::ToolDiagnostics>,
+}
+
+#[tauri::command]
+fn diagnostics(state: State<AppState>) -> CmdResult<Diagnostics> {
+    let eng = state.engine.lock().map_err(err)?;
+    Ok(Diagnostics {
+        app_version: env!("CARGO_PKG_VERSION"),
+        platform: window::platform(),
+        data_dir: aiuc_core::paths::app_data_dir().display().to_string(),
+        claude_web: eng.settings.claude_web,
+        // Cached by the worker: on a Mac each check reads the Keychain.
+        claude_code_login: CLAUDE_CODE_LOGIN.load(std::sync::atomic::Ordering::Relaxed),
+        signing_in: state.web.signing_in.load(std::sync::atomic::Ordering::SeqCst),
+        tools: eng.diagnostics(Utc::now()),
+    })
 }
 
 #[tauri::command]
@@ -230,7 +300,13 @@ fn spawn_worker(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Opti
             let (live_on, sync, api_base) = match engine.lock() {
                 Ok(mut eng) => {
                     let _ = eng.scan();
-                    (eng.settings.live_gauges, eng.settings.sync.clone(), eng.settings.api_base.clone())
+                    // A connected claude.ai account (claude_web.rs) reports the same
+                    // plan limits, so the Claude Code login is only the fallback.
+                    let use_oauth = eng.settings.live_gauges
+                        && !eng.settings.claude_web
+                        && eng.settings.tool(Tool::ClaudeCode).enabled
+                        && eng.settings.tool(Tool::ClaudeCode).plan_id.as_deref() != Some("api");
+                    (use_oauth, eng.settings.sync.clone(), eng.settings.api_base.clone())
                 }
                 Err(_) => break,
             };
@@ -238,16 +314,13 @@ fn spawn_worker(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Opti
             // Network work happens without holding the engine lock.
             if live_on && last_live.elapsed() >= LIVE_EVERY {
                 last_live = Instant::now();
-                let res = aiuc_core::live::fetch_claude_gauges(Utc::now());
-                if let Ok(mut eng) = engine.lock() {
-                    match res {
-                        Ok(g) => {
-                            eng.live_errors.remove(&Tool::ClaudeCode);
-                            let _ = eng.store.insert_gauges(&g);
-                        }
-                        Err(e) => {
-                            eng.live_errors.insert(Tool::ClaudeCode, e.to_string());
-                        }
+                let has_login = aiuc_core::live::has_claude_code_login();
+                CLAUDE_CODE_LOGIN.store(has_login, std::sync::atomic::Ordering::Relaxed);
+                // No Claude Code login is normal for claude.ai users: say nothing.
+                if has_login {
+                    let res = aiuc_core::live::fetch_claude_gauges(Utc::now()).map_err(|e| e.to_string());
+                    if let Ok(mut eng) = engine.lock() {
+                        eng.ingest_live(Tool::ClaudeCode, res);
                     }
                 }
             }
@@ -338,6 +411,8 @@ pub fn run() {
     let hotkey = engine.settings.hotkey.clone();
     let engine = Arc::new(Mutex::new(engine));
     let last = Arc::new(Mutex::new(None));
+    let hit = Arc::new(Mutex::new(window::Rect::default()));
+    let web = claude_web::ClaudeWeb::new();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -363,14 +438,21 @@ pub fn run() {
     }
 
     builder = builder
-        .manage(AppState { engine: engine.clone(), last: last.clone() })
+        .manage(AppState { engine: engine.clone(), last: last.clone(), hit: hit.clone(), web: web.clone() })
+        .manage(web.clone())
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             get_settings,
             save_settings,
             get_plans,
             detect_tools,
-            set_mode,
+            set_hit_rect,
+            focus_widget,
+            connect_claude,
+            claude_session_key,
+            disconnect_claude,
+            refresh_now,
+            diagnostics,
             layout,
             platform,
             dismiss_alert,
@@ -390,8 +472,10 @@ pub fn run() {
 
             if let Some(w) = window::widget(app) {
                 window::mac_float(&w);
-                window::apply(&w, false, None)?;
+                window::place(&w)?;
                 w.show()?;
+                // Click-through is switched on by hover.rs once the window is up
+                // (on Linux it must be realised first).
             }
 
             if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
@@ -440,6 +524,8 @@ pub fn run() {
             tray.build(app)?;
 
             spawn_worker(app.handle().clone(), engine.clone(), last.clone());
+            hover::spawn(app.handle().clone(), hit.clone());
+            claude_web::spawn(app.handle().clone(), web.clone(), engine.clone());
             #[cfg(feature = "updater")]
             spawn_updater(app.handle().clone());
             Ok(())

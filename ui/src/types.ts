@@ -35,6 +35,7 @@ export interface ToolStatus {
   burn_usd_per_min: number;
   locked: boolean;
   live_error: string | null;
+  needs_connect: boolean;
 }
 
 export interface AlertAction { kind: "stop" | "switch" | "dismiss" | "upgrade"; label: string; target_tool: Tool | null }
@@ -83,7 +84,32 @@ export interface Settings {
   hotkey: string;
   sync: { enabled: boolean; server_url: string | null; device_token: string | null; device_id: string | null };
   live_gauges: boolean;
+  claude_web: boolean;
   api_base: string;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
 export type Mode = "collapsed" | "expanded";
+
+export interface ToolDiagnostics {
+  tool: Tool;
+  label: string;
+  folders_found: string[];
+  folders_checked: string[];
+  requests_total: number;
+  requests_today: number;
+  last_request_at: string | null;
+  gauge_source: string | null;
+  gauge_at: string | null;
+  gauge_used_pct: number | null;
+  live_error: string | null;
+}
+export interface Diagnostics {
+  app_version: string;
+  platform: string;
+  data_dir: string;
+  claude_web: boolean;
+  claude_code_login: boolean;
+  signing_in: boolean;
+  tools: ToolDiagnostics[];
+}
+export interface Rect { x: number; y: number; w: number; h: number }

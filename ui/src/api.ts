@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Alert, Detected, Mode, Plan, Settings, Snapshot, Tool } from "./types";
+import type { Alert, Detected, Diagnostics, Plan, Rect, Settings, Snapshot, Tool } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -18,7 +18,13 @@ export const api = {
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
   plans: () => call<Record<Tool, Plan[]>>("get_plans"),
   detect: () => call<Detected[]>("detect_tools"),
-  setMode: (mode: Mode, height?: number) => call<void>("set_mode", { mode, height: height ?? null }),
+  setHitRect: (rect: Rect) => call<void>("set_hit_rect", { rect }),
+  focus: () => call<void>("focus_widget"),
+  connectClaude: () => call<void>("connect_claude"),
+  claudeSessionKey: (key: string) => call<void>("claude_session_key", { key }),
+  disconnectClaude: () => call<void>("disconnect_claude"),
+  refreshNow: () => call<void>("refresh_now"),
+  diagnostics: () => call<Diagnostics>("diagnostics"),
   dismiss: (id: string) => call<void>("dismiss_alert", { id }),
   alertAction: (alert: Alert) => call<string>("alert_action", { id: alert.id }),
   acceptNudge: () => call<void>("accept_nudge"),
@@ -29,7 +35,7 @@ export const api = {
   openUrl: (url: string) => call<void>("open_url", { url }),
   joinSync: (server: string, code: string, email: string) => call<void>("join_sync", { server, code, email }),
   platform: () => call<"macos" | "windows" | "linux">("platform"),
-  layout: () => call<{ platform: string; notch_height: number; collapsed: [number, number]; expanded: [number, number] } | null>("layout"),
+  layout: () => call<{ platform: string; notch_height: number; window: [number, number] } | null>("layout"),
   quit: () => call<void>("quit"),
 };
 
@@ -46,6 +52,13 @@ export async function onToggle(cb: () => void): Promise<() => void> {
   if (!inTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen("toggle", () => cb());
+}
+
+/** Cursor entered/left the widget's shape (tracked natively; see hover.rs). */
+export async function onHover(cb: (inside: boolean) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<boolean>("hover", (e) => cb(e.payload));
 }
 
 export async function onOpenView(cb: (v: string) => void): Promise<() => void> {
@@ -72,6 +85,7 @@ let mockSettings: Settings = {
   hotkey: "Alt+A",
   sync: { enabled: false, server_url: null, device_token: null, device_id: null },
   live_gauges: true,
+  claude_web: mockScenario === "connected",
   api_base: "https://api.aiusage.dev",
 };
 const dismissed = new Set<string>();
@@ -83,12 +97,13 @@ function mockSnapshot(): Snapshot {
   const tool = (tool: Tool, label: string, left: number, extra: Partial<Snapshot["tools"][0]> = {}): Snapshot["tools"][0] => ({
     tool, label, detected: true, enabled: true, plan_id: null, plan_name: null,
     headroom_pct: left, color: left <= 5 ? "red" : left <= 20 ? "amber" : "green", source: "live",
-    windows: [], minutes_left: null, active: false, today_cost_usd: 0, today_requests: 0, burn_usd_per_min: 0, locked: false, live_error: null, ...extra,
+    windows: [], minutes_left: null, active: false, today_cost_usd: 0, today_requests: 0, burn_usd_per_min: 0, locked: false, live_error: null, needs_connect: false, ...extra,
   });
   const tools = [
-    tool("claude_code", "Claude Code", claudeLeft, {
+    tool("claude_code", "Claude", mockScenario === "unconnected" ? 100 : claudeLeft, {
+      ...(mockScenario === "unconnected" ? { needs_connect: true, source: "estimate" as const } : {}),
       plan_name: "Claude Max 5x", active: true, minutes_left: paid ? 20 : null, today_cost_usd: 18.42, today_requests: 212, burn_usd_per_min: 0.31,
-      windows: [
+      windows: mockScenario === "unconnected" ? [] : [
         { key: "five_hour", label: "5-hour", used_pct: 100 - claudeLeft, headroom_pct: claudeLeft, resets_at: inMin(132), source: "live", used_usd: null, allowance_usd: null, used_requests: null, allowance_requests: null },
         { key: "weekly", label: "Weekly", used_pct: 41, headroom_pct: 59, resets_at: inMin(60 * 52), source: "live", used_usd: null, allowance_usd: null, used_requests: null, allowance_requests: null },
       ],
@@ -106,7 +121,7 @@ function mockSnapshot(): Snapshot {
   if (mockScenario === "runaway" && paid)
     alerts.push({ id: "run:mock", level: "red", kind: "runaway", tool: "claude_code", message: "$4.20 in 6 min, possible loop. Stop?", action: { kind: "stop", label: "Stop", target_tool: null }, session_id: "s", project: "/dev/acme", burn_usd_per_min: 0.7 });
   if (claudeLeft <= 20)
-    alerts.push({ id: `low:${claudeLeft <= 5 ? "red" : "amber"}`, level: claudeLeft <= 5 ? "red" : "amber", kind: "low_headroom", tool: "claude_code", message: `Claude Code 5-hour: ${Math.round(claudeLeft)}% left, about 20 min at this pace`, action: paid ? { kind: "switch", label: "Switch to Codex", target_tool: "codex" } : { kind: "dismiss", label: "Dismiss", target_tool: null }, session_id: null, project: null, burn_usd_per_min: null });
+    alerts.push({ id: `low:${claudeLeft <= 5 ? "red" : "amber"}`, level: claudeLeft <= 5 ? "red" : "amber", kind: "low_headroom", tool: "claude_code", message: `Claude 5-hour limit ${Math.round(100 - claudeLeft)}% used, about 20 min left at this pace`, action: paid ? { kind: "switch", label: "Switch to Codex", target_tool: "codex" } : { kind: "dismiss", label: "Dismiss", target_tool: null }, session_id: null, project: null, burn_usd_per_min: null });
   return {
     generated_at: now().toISOString(),
     onboarded: mockSettings.onboarded,
@@ -153,7 +168,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     case "save_settings": mockSettings = args!.settings as Settings; return null;
     case "get_plans": return mockPlans;
     case "detect_tools": return [
-      { tool: "claude_code", label: "Claude Code", found: true, roots: ["~/.claude/projects"] },
+      { tool: "claude_code", label: "Claude", found: true, roots: ["~/.claude/projects"] },
       { tool: "codex", label: "Codex", found: true, roots: ["~/.codex/sessions"] },
       { tool: "gemini", label: "Gemini", found: false, roots: [] },
     ];
@@ -162,7 +177,17 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     case "alert_action": dismissed.add(args!.id as string); return "ok";
     case "start_trial": mockTier = "trial"; return null;
     case "activate_licence": mockTier = "pro"; return "pro";
-    case "platform": return navigator.userAgent.includes("Windows") ? "windows" : "macos";
+    case "platform": return new URLSearchParams(location.search).get("platform") || (navigator.userAgent.includes("Windows") ? "windows" : "macos");
+    case "connect_claude": mockSettings.claude_web = true; return null;
+    case "disconnect_claude": mockSettings.claude_web = false; return null;
+    case "diagnostics": return {
+      app_version: "0.1.1", platform: "windows", data_dir: "C:/Users/you/AppData/Roaming/ai-usage-controller", claude_web: mockSettings.claude_web, claude_code_login: false, signing_in: false,
+      tools: [
+        { tool: "claude_code", label: "Claude", folders_found: ["C:/Users/you/.claude/projects"], folders_checked: ["C:/Users/you/.claude/projects", "C:/Users/you/.config/claude/projects"], requests_total: 1840, requests_today: 212, last_request_at: inMin(-2), gauge_source: mockSettings.claude_web ? "claude_web" : null, gauge_at: mockSettings.claude_web ? inMin(-1) : null, gauge_used_pct: mockSettings.claude_web ? 62 : null, live_error: null },
+        { tool: "codex", label: "Codex", folders_found: ["C:/Users/you/.codex/sessions"], folders_checked: ["C:/Users/you/.codex/sessions"], requests_total: 120, requests_today: 31, last_request_at: inMin(-90), gauge_source: "codex_log", gauge_at: inMin(-90), gauge_used_pct: 24, live_error: null },
+        { tool: "gemini", label: "Gemini", folders_found: [], folders_checked: ["C:/Users/you/.gemini/tmp"], requests_total: 0, requests_today: 0, last_request_at: null, gauge_source: null, gauge_at: null, gauge_used_pct: null, live_error: null },
+      ],
+    };
     default: return null;
   }
 }

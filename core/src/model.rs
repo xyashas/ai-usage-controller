@@ -22,7 +22,7 @@ impl Tool {
 
     pub fn label(&self) -> &'static str {
         match self {
-            Tool::ClaudeCode => "Claude Code",
+            Tool::ClaudeCode => "Claude",
             Tool::Codex => "Codex",
             Tool::Gemini => "Gemini",
         }

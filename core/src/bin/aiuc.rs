@@ -45,7 +45,7 @@ fn print_status(s: &Snapshot) {
             println!("  {:<12} 🔒 Pro", t.label);
             continue;
         }
-        let head = t.headroom_pct.map(|h| format!("{h:>5.1}% left")).unwrap_or_else(|| " learning".into());
+        let head = t.headroom_pct.map(|h| format!("{:>5.1}% used", 100.0 - h)).unwrap_or_else(|| " learning".into());
         let src = match t.source {
             Source::Live => "live",
             Source::Estimate => "estimate",

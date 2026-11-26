@@ -209,6 +209,25 @@ impl Store {
         Ok(v.map(from_ms))
     }
 
+    /// (number of AI requests, newest event time) for the diagnostics screen.
+    pub fn event_stats(&self, tool: Tool) -> Result<(u64, Option<DateTime<Utc>>)> {
+        let (n, last): (i64, Option<i64>) = self.conn.query_row(
+            "SELECT COUNT(*), MAX(ts) FROM events WHERE tool = ?1 AND kind = 'assistant'",
+            params![tool.as_str()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok((n as u64, last.map(from_ms)))
+    }
+
+    pub fn has_gauges(&self, tool: Tool) -> Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM gauges WHERE tool = ?1 LIMIT 1)",
+            params![tool.as_str()],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
     pub fn has_events(&self, tool: Tool) -> Result<bool> {
         let n: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM (SELECT 1 FROM events WHERE tool = ?1 LIMIT 1)",

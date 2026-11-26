@@ -29,6 +29,25 @@ pub struct ToolStatus {
     /// True when hidden behind the Pro paywall.
     pub locked: bool,
     pub live_error: Option<String>,
+    /// Claude only: no fresh plan gauge, so numbers are estimates from Claude Code
+    /// logs (which miss claude.ai and desktop-app use). The UI offers to connect.
+    pub needs_connect: bool,
+}
+
+/// What the app can see on this machine, for the "Check setup" screen.
+#[derive(Clone, Debug, Serialize)]
+pub struct ToolDiagnostics {
+    pub tool: Tool,
+    pub label: String,
+    pub folders_found: Vec<String>,
+    pub folders_checked: Vec<String>,
+    pub requests_total: u64,
+    pub requests_today: u64,
+    pub last_request_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub gauge_source: Option<String>,
+    pub gauge_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub gauge_used_pct: Option<f64>,
+    pub live_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
