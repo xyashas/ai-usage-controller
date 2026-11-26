@@ -107,6 +107,7 @@ pub struct Snapshot {
     pub active_tool: Option<Tool>,
     pub tools: Vec<ToolStatus>,
     pub today: TodayStats,
+    pub handoff_session: Option<String>,
     pub session_meter: Option<SessionMeter>,
     /// Highest-priority alert first.
     pub alerts: Vec<Alert>,

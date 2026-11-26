@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Snapshot, ToolStatus, WindowStatus } from "../types";
 import type { View } from "../App";
 import { UsageBar } from "./UsageBar";
@@ -110,6 +111,21 @@ function ToolRow({ t, onPaywall }: { t: ToolStatus; onPaywall: () => void }) {
 }
 
 export function Expanded({ snap, onView, refresh }: { snap: Snapshot; onView: (v: View) => void; refresh: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  async function handoff() {
+    if (busy || !snap.handoff_session) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await api.handoff(snap.handoff_session);
+      setNotice("Paste the copied handoff into Codex.");
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
   const paid = snap.entitlements.tier !== "free";
   const active = snap.tools.find((t) => t.tool === snap.active_tool && t.enabled) ?? snap.tools.find((t) => t.detected && t.enabled);
   const others = snap.tools.filter((t) => t !== active && t.detected && t.enabled);
@@ -125,6 +141,9 @@ export function Expanded({ snap, onView, refresh }: { snap: Snapshot; onView: (v
       ) : (
         <p className="text-[13px] leading-relaxed text-white/60">No Claude, Codex or Gemini usage found yet. Connect your Claude account, or run one of the command-line tools once.</p>
       )}
+
+      {snap.handoff_session && <button className="rounded-xl bg-accent py-2 text-sm font-semibold text-black" disabled={busy} onClick={handoff}>{busy ? "Opening Codex..." : "Continue in Codex"}</button>}
+      {notice && <p role="status" className="text-xs text-white/75">{notice}</p>}
 
       {claude && (claude.needs_connect || claude.live_error) && <ClaudeConnect tool={claude} onChanged={refresh} />}
 

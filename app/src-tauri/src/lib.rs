@@ -1,5 +1,6 @@
 mod claude_web;
 mod hover;
+mod handoff;
 mod window;
 
 use aiuc_core::model::Tool;
@@ -48,6 +49,22 @@ fn snapshot_now(state: &AppState) -> CmdResult<Snapshot> {
 #[tauri::command]
 fn get_snapshot(state: State<AppState>) -> CmdResult<Snapshot> {
     snapshot_now(&state)
+}
+
+#[tauri::command]
+async fn continue_in_codex(state: State<'_, AppState>, session: String) -> CmdResult<()> {
+    let engine = state.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = {
+            let mut eng = engine.lock().map_err(err)?;
+            if eng.snapshot(Utc::now()).map_err(err)?.handoff_session.as_ref() != Some(&session) {
+                return Err("The active session or usage limit changed.".into());
+            }
+            eng.roots(Tool::ClaudeCode)
+        };
+        let (cwd, prompt) = aiuc_core::handoff::prepare(&roots, &session).map_err(err)?;
+        handoff::open(&cwd, &prompt)
+    }).await.map_err(err)?
 }
 
 #[tauri::command]
@@ -442,6 +459,7 @@ pub fn run() {
         .manage(web.clone())
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            continue_in_codex,
             get_settings,
             save_settings,
             get_plans,

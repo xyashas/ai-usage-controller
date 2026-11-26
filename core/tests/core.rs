@@ -565,3 +565,47 @@ fn claude_web_gauge_shows_plan_usage_without_claude_code_logs() {
     eng.ingest_live(Tool::ClaudeCode, Err("signed out".into()));
     assert_eq!(eng.diagnostics(now)[0].live_error.as_deref(), Some("signed out"));
 }
+
+#[test]
+fn handoff_uses_only_the_selected_main_conversation() {
+    use serde_json::json;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("project with spaces");
+    std::fs::create_dir(&dir).unwrap();
+    let rows = [
+        json!({"type":"user","sessionId":"s","cwd":dir,"message":{"content":"Fix checkout"}}),
+        json!({"type":"user","sessionId":"other","message":{"content":"private unrelated goal"}}),
+        json!({"type":"assistant","sessionId":"s","message":{"content":[
+            {"type":"tool_use","name":"Edit","input":{"file_path":"cart.rs","new_string":"private source"}},
+            {"type":"tool_use","name":"TodoWrite","input":{"todos":[{"status":"pending","content":"Run tests"},{"status":"completed","content":"old todo"}]}}
+        ]}}),
+        json!({"type":"user","sessionId":"s","message":{"content":[
+            {"type":"tool_result","content":"private successful output"},
+            {"type":"tool_result","is_error":true,"content":"checkout failed"}
+        ]}})
+    ];
+    let mut log = std::fs::File::create(dir.join("s.jsonl")).unwrap();
+    for row in rows { writeln!(log, "{row}").unwrap(); }
+    writeln!(log, "{{partial").unwrap();
+    let roots = [tmp.path().to_owned()];
+    let (cwd, prompt) = aiuc_core::handoff::prepare(&roots, "s").unwrap();
+    assert_eq!(cwd, dir);
+    for expected in ["Fix checkout", "cart.rs", "Run tests", "checkout failed"] {
+        assert!(prompt.contains(expected));
+    }
+    assert!(!prompt.contains("private"));
+    assert!(!prompt.contains("old todo"));
+    assert!(aiuc_core::handoff::prepare(&roots, "../project with spaces/s").is_err());
+}
+
+#[test]
+fn handoff_requires_an_active_claude_session_at_95_percent() {
+    let now = t("2026-11-26T12:00:00Z");
+    for (used, age, expected) in [(94.9, 0, None), (95.0, 0, Some("cur")), (99.0, 120, None)] {
+        let events = vec![ev(Tool::ClaudeCode, EventKind::Assistant, now - Duration::minutes(age), "cur", 0.1)];
+        let mut eng = engine_with(events, vec![]);
+        let usage = serde_json::json!({"five_hour":{"utilization":used,"resets_at":"2026-11-26T14:00:00Z"}});
+        eng.ingest_live(Tool::ClaudeCode, Ok(aiuc_core::live::parse_claude_usage_from(&usage, now, "claude_web")));
+        assert_eq!(eng.snapshot(now).unwrap().handoff_session.as_deref(), expected);
+    }
+}

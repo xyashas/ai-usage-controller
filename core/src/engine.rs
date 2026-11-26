@@ -573,6 +573,7 @@ impl Engine {
             active_tool,
             tools,
             today,
+            handoff_session: session_meter.as_ref().filter(|m| m.tool == Tool::ClaudeCode).map(|m| m.session_id.clone()),
             session_meter,
             alerts,
             nudge,
@@ -584,6 +585,9 @@ impl Engine {
         };
         if !ent.paid() {
             self.apply_free_limits(&mut snap);
+        }
+        if !snap.tools.iter().any(|t| t.tool == Tool::ClaudeCode && t.enabled && t.headroom_pct.is_some_and(|p| p <= 5.0)) {
+            snap.handoff_session = None;
         }
         Ok(snap)
     }

@@ -152,12 +152,13 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
 `app/src-tauri/tauri.updater.conf.json`, code-signing secrets.
 
 ## Roadmap (agreed next steps, in order)
-1. **One-click handoff when about to be cut off.** At ~95% (or on the alert),
-   a "Continue in Codex / Gemini" button: read the active Claude Code session from
-   its local JSONL (last user goals, files touched, open TODOs, last errors),
-   build a concise handoff prompt, copy it to the clipboard and open a terminal in
-   the same project folder running the other CLI. Never send log content anywhere
-   but the user's own clipboard/terminal. Also the reverse direction.
+1. **One-click handoff.** Claude Code to Codex is implemented. At 95% usage
+   of a tracked Claude window, the active local session gets a Continue in Codex
+   button. The native command rechecks the session ID, summarizes its JSONL
+   in memory, copies the prompt, and starts interactive Codex in the logged cwd.
+   Paste the prompt into Codex to review and submit. Linux uses wl-copy or xclip
+   and x-terminal-emulator or xterm. Native terminal launches still need manual
+   verification. Gemini and reverse handoffs remain open.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).

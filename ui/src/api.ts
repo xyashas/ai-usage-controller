@@ -13,6 +13,7 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const api = {
+  handoff: (session: string) => call<void>("continue_in_codex", { session }),
   snapshot: () => call<Snapshot>("get_snapshot"),
   settings: () => call<Settings>("get_settings"),
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
@@ -129,6 +130,7 @@ function mockSnapshot(): Snapshot {
     active_tool: "claude_code",
     tools,
     today: { cost_usd: 20.92, sessions: 7, top_session: paid ? { tool: "claude_code", session_id: "s", project_name: "acme-api", cost_usd: 9.8 } : null },
+    handoff_session: mockScenario === "critical" ? "s" : null,
     session_meter: paid ? { tool: "claude_code", session_id: "s", project_name: "acme-api", cost_usd: 3.62 + ((t / 3) % 10) * 0.02, started_at: inMin(-38), minutes: 38, burn_usd_per_min: 0.31 } : null,
     alerts: alerts.filter((a) => !dismissed.has(a.id)),
     nudge: paid && !dismissed.has("nudge") ? { id: "n", tool: "claude_code", count: 340, from_label: "Opus", to_label: "Sonnet", to_model: "claude-sonnet-5-5", actual_usd: 20, alternative_usd: 8, saving_usd: 12, message: "You ran 340 small edits on Opus today. Sonnet would cost about $12 less." } : null,
