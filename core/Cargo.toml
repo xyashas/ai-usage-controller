@@ -1,0 +1,30 @@
+[package]
+name = "aiuc-core"
+description = "AI Usage Controller engine: local log parsers, usage store, headroom, burn rate, runaway detection, plan audit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "aiuc_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aiuc"
+path = "src/bin/aiuc.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+dirs = "6"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+ureq = { version = "3", features = ["json"] }
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

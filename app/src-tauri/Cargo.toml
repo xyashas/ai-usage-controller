@@ -1,0 +1,38 @@
+[package]
+name = "aiuc-app"
+description = "AI Usage Controller desktop widget (Mac notch / Windows pill)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "aiuc_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+aiuc-core = { path = "../../core" }
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = { version = "2", optional = true }
+ureq = { version = "3", features = ["json"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSScreen", "NSResponder", "NSGraphics"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+
+[features]
+default = []
+# Signed auto-updates. Enabled in release builds once the updater key is set (see docs/RELEASING.md).
+updater = ["dep:tauri-plugin-updater"]

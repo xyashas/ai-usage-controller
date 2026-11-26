@@ -1,0 +1,92 @@
+use crate::model::Tool;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToolSettings {
+    pub enabled: bool,
+    /// Plan id from plans.json, e.g. "max5". None = not chosen yet.
+    pub plan_id: Option<String>,
+    /// Manual allowance override for the 5-hour (Claude/Codex) window, in API-equivalent USD.
+    pub five_hour_allowance_usd: Option<f64>,
+    /// Manual allowance override for the weekly window, in API-equivalent USD.
+    pub weekly_allowance_usd: Option<f64>,
+    /// Extra log roots, e.g. for Antigravity CLI.
+    pub extra_roots: Vec<PathBuf>,
+}
+
+impl Default for ToolSettings {
+    fn default() -> Self {
+        ToolSettings { enabled: true, plan_id: None, five_hour_allowance_usd: None, weekly_allowance_usd: None, extra_roots: vec![] }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AlertSettings {
+    /// Amber when headroom falls to this % or below.
+    pub amber_pct: f64,
+    /// Red when headroom falls to this % or below.
+    pub red_pct: f64,
+    pub runaway_alerts: bool,
+    /// One-click stop sends an interrupt to the session process. Off until thresholds are proven.
+    pub one_click_stop: bool,
+    pub notifications: bool,
+}
+
+impl Default for AlertSettings {
+    fn default() -> Self {
+        AlertSettings { amber_pct: 20.0, red_pct: 5.0, runaway_alerts: true, one_click_stop: false, notifications: true }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SyncSettings {
+    pub enabled: bool,
+    pub server_url: Option<String>,
+    pub device_token: Option<String>,
+    pub device_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    pub onboarded: bool,
+    pub tools: BTreeMap<Tool, ToolSettings>,
+    /// The single tool a Free user tracks.
+    pub primary_tool: Option<Tool>,
+    pub alerts: AlertSettings,
+    pub hotkey: String,
+    pub sync: SyncSettings,
+    /// Read Claude's live 5-hour/weekly gauges with the Claude Code login (unofficial, best-effort).
+    pub live_gauges: bool,
+    pub api_base: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        let mut tools = BTreeMap::new();
+        for t in Tool::ALL {
+            tools.insert(t, ToolSettings::default());
+        }
+        Settings {
+            onboarded: false,
+            tools,
+            primary_tool: None,
+            alerts: AlertSettings::default(),
+            hotkey: "Alt+A".into(),
+            sync: SyncSettings::default(),
+            live_gauges: true,
+            api_base: "https://api.aiusage.dev".into(),
+        }
+    }
+}
+
+impl Settings {
+    pub fn tool(&self, t: Tool) -> ToolSettings {
+        self.tools.get(&t).cloned().unwrap_or_default()
+    }
+}

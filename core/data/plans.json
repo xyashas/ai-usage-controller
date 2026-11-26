@@ -1,0 +1,24 @@
+{
+  "version": "2026-11-26",
+  "note": "Monthly USD prices and relative capacity per tier. Capacity is the vendor's stated multiple of the base tier and is used by the plan audit. Gemini limits are requests/day from Google's quota page. Served from the backend at /v1/plans.",
+  "tools": {
+    "claude_code": [
+      { "id": "pro",   "name": "Claude Pro",     "price": 20,  "capacity": 1 },
+      { "id": "max5",  "name": "Claude Max 5x",  "price": 100, "capacity": 5 },
+      { "id": "max20", "name": "Claude Max 20x", "price": 200, "capacity": 20 },
+      { "id": "api",   "name": "API (pay as you go)", "price": 0, "capacity": 0, "metered": true }
+    ],
+    "codex": [
+      { "id": "plus",     "name": "ChatGPT Plus",     "price": 20,  "capacity": 1 },
+      { "id": "business", "name": "ChatGPT Business", "price": 30,  "capacity": 1 },
+      { "id": "pro",      "name": "ChatGPT Pro",      "price": 200, "capacity": 6 },
+      { "id": "api",      "name": "API (pay as you go)", "price": 0, "capacity": 0, "metered": true }
+    ],
+    "gemini": [
+      { "id": "free",     "name": "Free Google account", "price": 0,      "capacity": 1000, "daily_requests": 1000 },
+      { "id": "ai_pro",   "name": "Google AI Pro",       "price": 19.99,  "capacity": 1500, "daily_requests": 1500 },
+      { "id": "ai_ultra", "name": "Google AI Ultra",     "price": 249.99, "capacity": 2000, "daily_requests": 2000 },
+      { "id": "api_free", "name": "Free API key",        "price": 0,      "capacity": 250,  "daily_requests": 250 }
+    ]
+  }
+}

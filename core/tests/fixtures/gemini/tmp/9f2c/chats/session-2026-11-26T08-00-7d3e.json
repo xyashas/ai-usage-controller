@@ -1,0 +1,16 @@
+{
+  "sessionId": "7d3e1a00-2222-4b5c-8d9e-cccccccccccc",
+  "projectHash": "9f2c",
+  "startTime": "2026-11-26T08:00:00.000Z",
+  "lastUpdated": "2026-11-26T08:05:00.000Z",
+  "messages": [
+    { "id": "m1", "timestamp": "2026-11-26T08:00:00.000Z", "type": "user", "content": "add a README section about setup" },
+    { "id": "m2", "timestamp": "2026-11-26T08:00:10.000Z", "type": "gemini", "content": "Sure.", "model": "gemini-2.5-pro",
+      "thoughts": [{"subject": "Planning", "description": "..."}],
+      "tokens": { "input": 8000, "output": 400, "cached": 2000, "thoughts": 600, "tool": 0, "total": 9000 },
+      "toolCalls": [{ "id": "t1", "name": "read_file", "args": { "absolute_path": "/home/dev/proj/README.md" }, "status": "success" }] },
+    { "id": "m3", "timestamp": "2026-11-26T08:00:30.000Z", "type": "info", "content": "Request cancelled." },
+    { "id": "m4", "timestamp": "2026-11-26T08:01:00.000Z", "type": "gemini", "content": "Done.", "model": "gemini-2.5-flash",
+      "tokens": { "input": 3000, "output": 100, "cached": 0, "thoughts": 0, "tool": 0, "total": 3100 } }
+  ]
+}
