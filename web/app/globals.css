@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0b0b0f;
+  --color-panel: #141419;
+  --color-line: #26262e;
+  --color-mute: #8b8b98;
+  --color-accent: #8b8bff;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+@layer base {
+  html { background: var(--color-ink); color: #ececf1; }
+  body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+  ::selection { background: rgba(139, 139, 255, 0.35); }
+}
+@utility tabular { font-variant-numeric: tabular-nums; }

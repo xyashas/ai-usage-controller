@@ -61,20 +61,22 @@ pub fn payload(store: &Store, limit: usize) -> Result<Vec<SyncedEvent>> {
         .collect())
 }
 
-pub fn push(store: &mut Store, s: &SyncSettings) -> Result<usize> {
+/// `meta` carries the device's plan choices and audit results (no usage detail),
+/// which the team dashboard uses for the idle-seat and waste reports.
+pub fn push(store: &mut Store, s: &SyncSettings, meta: &serde_json::Value) -> Result<usize> {
     let (Some(url), Some(token)) = (&s.server_url, &s.device_token) else {
         return Err(anyhow!("sync is not set up"));
     };
     let mut total = 0;
     loop {
         let batch = payload(store, 500)?;
-        if batch.is_empty() {
+        if batch.is_empty() && total > 0 {
             break;
         }
         let mut resp = agent()
             .post(&format!("{}/v1/sync", url.trim_end_matches('/')))
             .header("Authorization", &format!("Bearer {token}"))
-            .send_json(json!({ "events": batch }))?;
+            .send_json(json!({ "events": batch, "meta": meta }))?;
         if resp.status().as_u16() != 200 {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
             return Err(anyhow!("sync failed: HTTP {} {}", resp.status().as_u16(), body));
@@ -82,6 +84,7 @@ pub fn push(store: &mut Store, s: &SyncSettings) -> Result<usize> {
         let keys: Vec<String> = batch.iter().map(|e| e.key.clone()).collect();
         store.mark_synced(&keys)?;
         total += keys.len();
+        // An empty first batch still goes out once: it's the device heartbeat carrying `meta`.
         if keys.len() < 500 {
             break;
         }

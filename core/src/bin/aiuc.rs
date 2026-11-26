@@ -7,6 +7,8 @@
 //!   aiuc audit                 monthly plan audit
 //!   aiuc trial                 start the 7-day Pro trial
 //!   aiuc activate <key>        activate a Pro/Team licence key
+//!   aiuc join <server> <invite-code> <email>   join a team or personal sync group
+//!   aiuc sync                  push usage counts now (only counts; never prompts or code)
 
 use aiuc_core::metrics::Source;
 use aiuc_core::{Engine, Snapshot, Tool};
@@ -187,8 +189,30 @@ fn main() -> anyhow::Result<()> {
             let rec = aiuc_core::licence::activate(&engine.store, key, &host)?;
             println!("Activated: {:?}", rec.tier);
         }
+        "join" => {
+            let (Some(server), Some(code)) = (args.get(1), args.get(2)) else {
+                anyhow::bail!("usage: aiuc join <server> <invite-code> [email]");
+            };
+            let email = args.get(3).cloned().unwrap_or_default();
+            let host = sysinfo::System::host_name().unwrap_or_else(|| "device".into());
+            engine.settings.sync = aiuc_core::sync::join(server, code, &email, &host)?;
+            engine.save_settings()?;
+            println!("Joined. Run `aiuc sync` or keep the app open to sync.");
+        }
+        "sync" => {
+            engine.scan()?;
+            let s = engine.snapshot(Utc::now())?;
+            let plans: std::collections::BTreeMap<Tool, Option<String>> =
+                Tool::ALL.iter().map(|t| (*t, engine.settings.tool(*t).plan_id)).collect();
+            let meta = serde_json::json!({ "plans": plans, "audit": s.audit, "app_version": env!("CARGO_PKG_VERSION") });
+            let sync = engine.settings.sync.clone();
+            let n = aiuc_core::sync::push(&mut engine.store, &sync, &meta)?;
+            let summary = aiuc_core::sync::pull_summary(&sync)?;
+            println!("Synced {n} records. All devices: ${:.2} today, ${:.2} this month across {} devices.",
+                summary.today_cost_all_devices, summary.month_cost_all_devices, summary.devices);
+        }
         _ => {
-            eprintln!("commands: paths | status [--json] | watch | plan <tool> <plan> | audit | trial | activate <key>");
+            eprintln!("commands: paths | status [--json] | watch | plan <tool> <plan> | audit | trial | activate <key> | join <server> <code> <email> | sync");
             std::process::exit(2);
         }
     }

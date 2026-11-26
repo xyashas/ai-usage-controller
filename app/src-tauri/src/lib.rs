@@ -264,8 +264,18 @@ fn spawn_worker(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Opti
             }
             if sync.enabled && last_sync.elapsed() >= SYNC_EVERY {
                 last_sync = Instant::now();
+                let audit = last.lock().ok().and_then(|l| l.as_ref().map(|s| s.audit.clone())).unwrap_or_default();
                 if let Ok(mut eng) = engine.lock() {
-                    let _ = aiuc_core::sync::push(&mut eng.store, &sync);
+                    let plans: BTreeMap<Tool, Option<String>> = Tool::ALL.iter().map(|t| (*t, eng.settings.tool(*t).plan_id)).collect();
+                    let meta = serde_json::json!({
+                        "plans": plans,
+                        "audit": audit.iter().map(|a| serde_json::json!({
+                            "tool": a.tool, "action": a.action, "current_plan": a.current_plan,
+                            "monthly_saving_usd": a.monthly_saving_usd, "peak_used_pct": a.peak_used_pct
+                        })).collect::<Vec<_>>(),
+                        "app_version": env!("CARGO_PKG_VERSION"),
+                    });
+                    let _ = aiuc_core::sync::push(&mut eng.store, &sync, &meta);
                 }
                 if let Ok(summary) = aiuc_core::sync::pull_summary(&sync) {
                     if let Ok(mut eng) = engine.lock() {
