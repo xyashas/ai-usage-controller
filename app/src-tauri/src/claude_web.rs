@@ -36,13 +36,13 @@ const UA: Option<&str> = None;
 /// Kicks off a fetch; the result lands in `window.__aiuc` a moment later.
 const KICK_JS: &str = r#"(function(){if(location.origin!=='https://claude.ai'||window.__aiucBusy)return;window.__aiucBusy=1;(async function(){try{
 var r=await fetch('/api/organizations',{credentials:'include',signal:AbortSignal.timeout(15000),headers:{'accept':'application/json'}});
-if(new URL(r.url).pathname.startsWith('/login')||r.status===401||r.status===403)throw new Error('signed_out');
+if(new URL(r.url).pathname.startsWith('/login')||r.status===401||(r.status===403&&(r.headers.get('content-type')||'').includes('json')))throw new Error('signed_out');
 if(!r.ok)throw new Error('organizations HTTP '+r.status);
 var orgs=await r.json();
 var org=(orgs.find(function(o){return (o.capabilities||[]).indexOf('chat')>=0})||orgs[0]);
 if(!org)throw new Error('no Claude organization on this account');
 var u=await fetch('/api/organizations/'+org.uuid+'/usage',{credentials:'include',signal:AbortSignal.timeout(15000),headers:{'accept':'application/json'}});
-if(new URL(u.url).pathname.startsWith('/login')||u.status===401||u.status===403)throw new Error('signed_out');
+if(new URL(u.url).pathname.startsWith('/login')||u.status===401||(u.status===403&&(u.headers.get('content-type')||'').includes('json')))throw new Error('signed_out');
 if(!u.ok)throw new Error('usage HTTP '+u.status);
 window.__aiuc={ok:true,data:await u.json()};
 }catch(e){window.__aiuc={ok:false,error:String(e&&e.message||e)}}finally{window.__aiucBusy=0}})()})()"#;
@@ -160,7 +160,10 @@ pub fn spawn(app: AppHandle, state: Arc<ClaudeWeb>, engine: Arc<Mutex<Engine>>) 
 
             // 1. Waiting for the user to finish signing in.
             if state.signing_in.load(Ordering::SeqCst) {
-                let Some(w) = window(&app) else { continue };
+                let Some(w) = window(&app) else {
+                    state.signing_in.store(false, Ordering::SeqCst);
+                    continue;
+                };
                 let on_app = w.url().map(|u| u.host_str() == Some("claude.ai") && !u.path().starts_with("/login") && !u.path().starts_with("/magic-link")).unwrap_or(false);
                 if on_app && has_session_cookie(&w) {
                     state.signing_in.store(false, Ordering::SeqCst);

@@ -122,7 +122,7 @@ export default function App() {
   const lastAlert = useRef<string | null>(null);
   useEffect(() => {
     const a = snap?.alerts[0];
-    if (a && a.id !== lastAlert.current && a.level === "red" && !openRef.current) {
+    if (a && !snap?.idle_hidden && a.id !== lastAlert.current && a.level === "red" && !openRef.current) {
       lastAlert.current = a.id;
       setOpen(true);
     }

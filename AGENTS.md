@@ -157,8 +157,9 @@ Verified on the owner's **Windows** PC (v0.1.1):
 - Hover open/close, pill, panel, red alert, session meter, "time left at this
   pace", Today/Priciest stats all work with real Claude Code use.
 
-Desktop lifecycle tests cover stale and offline readings, expiry recovery, and
-idle boundaries. OS login, tray interaction, notifications, and idle wake still
+GitHub CI passed the desktop lifecycle core tests on Windows, macOS, and Linux,
+the UI production build, and the Linux desktop compile check. Tests cover stale
+and offline readings, expiry recovery, and idle boundaries. OS login, tray interaction, notifications, and idle wake still
 need hands-on verification on Windows and macOS.
 
 Not yet verified: Mac notch placement on real hardware; Codex and Gemini parsers

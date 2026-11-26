@@ -66,11 +66,13 @@ fn apply_autostart(app: &AppHandle, settings: &Settings) -> CmdResult<()> {
 }
 
 #[tauri::command]
-fn save_settings(app: AppHandle, state: State<AppState>, settings: Settings) -> CmdResult<()> {
+fn save_settings(app: AppHandle, state: State<AppState>, mut settings: Settings) -> CmdResult<()> {
     apply_autostart(&app, &settings)?;
     let old_hotkey = {
         let mut eng = state.engine.lock().map_err(err)?;
         let old = eng.settings.hotkey.clone();
+        // Sign-in can complete while onboarding or Settings is still open.
+        settings.claude_web = eng.settings.claude_web;
         eng.settings = settings.clone();
         eng.save_settings().map_err(err)?;
         old
