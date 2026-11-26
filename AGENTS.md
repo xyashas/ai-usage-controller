@@ -152,13 +152,15 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
 `app/src-tauri/tauri.updater.conf.json`, code-signing secrets.
 
 ## Roadmap (agreed next steps, in order)
-1. **One-click handoff.** Claude Code to Codex is implemented. At 95% usage
-   of a tracked Claude window, the active local session gets a Continue in Codex
-   button. The native command rechecks the session ID, summarizes its JSONL
-   in memory, copies the prompt, and starts interactive Codex in the logged cwd.
-   Paste the prompt into Codex to review and submit. Linux uses wl-copy or xclip
-   and x-terminal-emulator or xterm. Native terminal launches still need manual
-   verification. Gemini and reverse handoffs remain open.
+1. **One-click handoff.** At 90% usage of a tracked Claude window, offer the
+   most recent local Claude Code session with activity in the past two hours.
+   Check PATH for Codex and show an install hint when missing. On click, recheck
+   the session and executable, summarize goals, the last three assistant replies,
+   files, TODOs, errors, and up to 20 lines of Git status. Write the summary
+   (under 1,500 words) to `.aiuc-handoff.md` in the project, copy it to the
+   clipboard when available, and start Codex there with an instruction to read
+   the file and continue. Native terminal launches still need manual verification.
+   Gemini and reverse handoffs remain open.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).
@@ -172,7 +174,8 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
 
 ## Conventions
 - Keep UI copy plain and short; show % used; label estimates as "est.".
-- Privacy is a feature: never store or sync prompt text, code, file names or
+- The user-triggered local handoff file is the explicit persistence exception.
+  For usage tracking, never store or sync prompt text, code, file names or
   project names (sync sends counts only — there's a test for this). Keep it that way.
 - New core logic gets a test in `core/tests/core.rs`.
 - Commit messages: imperative summary line, then bullets of what/why.

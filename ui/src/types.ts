@@ -64,6 +64,7 @@ export interface Snapshot {
   active_tool: Tool | null;
   tools: ToolStatus[];
   today: { cost_usd: number; sessions: number; top_session: { tool: Tool; session_id: string; project_name: string | null; cost_usd: number } | null };
+  codex_installed: boolean,
   handoff_session: string | null;
   session_meter: { tool: Tool; session_id: string; project_name: string | null; cost_usd: number; started_at: string; minutes: number; burn_usd_per_min: number } | null;
   alerts: Alert[];

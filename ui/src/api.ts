@@ -130,6 +130,7 @@ function mockSnapshot(): Snapshot {
     active_tool: "claude_code",
     tools,
     today: { cost_usd: 20.92, sessions: 7, top_session: paid ? { tool: "claude_code", session_id: "s", project_name: "acme-api", cost_usd: 9.8 } : null },
+    codex_installed: true,
     handoff_session: mockScenario === "critical" ? "s" : null,
     session_meter: paid ? { tool: "claude_code", session_id: "s", project_name: "acme-api", cost_usd: 3.62 + ((t / 3) % 10) * 0.02, started_at: inMin(-38), minutes: 38, burn_usd_per_min: 0.31 } : null,
     alerts: alerts.filter((a) => !dismissed.has(a.id)),

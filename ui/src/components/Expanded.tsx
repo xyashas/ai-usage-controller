@@ -119,7 +119,7 @@ export function Expanded({ snap, onView, refresh }: { snap: Snapshot; onView: (v
     setNotice("");
     try {
       await api.handoff(snap.handoff_session);
-      setNotice("Paste the copied handoff into Codex.");
+      setNotice("Opened Codex with the handoff.");
     } catch (error) {
       setNotice(String(error));
     } finally {
@@ -142,7 +142,11 @@ export function Expanded({ snap, onView, refresh }: { snap: Snapshot; onView: (v
         <p className="text-[13px] leading-relaxed text-white/60">No Claude, Codex or Gemini usage found yet. Connect your Claude account, or run one of the command-line tools once.</p>
       )}
 
-      {snap.handoff_session && <button className="rounded-xl bg-accent py-2 text-sm font-semibold text-black" disabled={busy} onClick={handoff}>{busy ? "Opening Codex..." : "Continue in Codex"}</button>}
+      {snap.handoff_session && (snap.codex_installed ? (
+        <button className="w-full rounded-full bg-white py-2 text-[12.5px] font-semibold text-black hover:bg-white/90" disabled={busy} onClick={handoff}>
+          {busy ? "Opening Codex..." : "Continue in Codex"}
+        </button>
+      ) : <p className="text-[12.5px] text-white/75">Install Codex to hand off</p>)}
       {notice && <p role="status" className="text-xs text-white/75">{notice}</p>}
 
       {claude && (claude.needs_connect || claude.live_error) && <ClaudeConnect tool={claude} onChanged={refresh} />}

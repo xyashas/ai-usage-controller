@@ -24,7 +24,5 @@ serde_json = "1"
 sha2 = "0.10"
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 ureq = { version = "3", features = ["json"] }
-walkdir = "2"
-
-[dev-dependencies]
 tempfile = "3"
+walkdir = "2"
