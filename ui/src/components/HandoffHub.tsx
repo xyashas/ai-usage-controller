@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { View } from "../App";
-import type { HandoffOffer, RepoStatus, SetupResult, Tool } from "../types";
+import type { HandoffOffer, HandoffSession, RepoStatus, SetupResult, Tool } from "../types";
 import { api } from "../api";
 import { tint, toolName } from "../theme";
 import { TopBar } from "./TopBar";
@@ -21,7 +21,112 @@ function since(seconds: number) {
 /** Where cloud agents pick a handoff up: the auto section says "(cloud)". */
 const fromCloud = (r: RepoStatus) => /\(cloud\)/.test(r.latest?.content ?? "");
 
-function LocalSessions({ offers, onPick }: { offers: HandoffOffer[]; onPick: (o: HandoffOffer, t: Tool) => void }) {
+function SessionPicker({ sessions, offers, onPick }: {
+  sessions: HandoffSession[];
+  offers: HandoffOffer[];
+  onPick: (o: HandoffOffer, t: Tool) => void;
+}) {
+  const [project, setProject] = useState<string>("all");
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  const projects = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const s of sessions) {
+      if (!seen.has(s.project)) {
+        seen.add(s.project);
+        list.push(s.project);
+      }
+    }
+    return list;
+  }, [sessions]);
+
+  const filtered = useMemo(
+    () => (project === "all" ? sessions : sessions.filter((s) => s.project === project)),
+    [sessions, project]
+  );
+
+  // Default-select the newest visible session so target buttons are 1 click away.
+  const activeKey = filtered.some((s) => `${s.source}:${s.session}` === selectedKey)
+    ? selectedKey
+    : filtered[0] ? `${filtered[0].source}:${filtered[0].session}` : null;
+
+  if (sessions.length > 0) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <p className="eyebrow">Choose a chat to hand off</p>
+          <span className="text-[11px] text-mute">{filtered.length} session{filtered.length === 1 ? "" : "s"}</span>
+        </div>
+
+        {projects.length > 1 && (
+          <div className="flex flex-wrap gap-1 px-0.5" role="group" aria-label="Filter by project">
+            <button
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${project === "all" ? "bg-white/15 text-fg" : "bg-white/[0.05] text-muted hover:text-fg"}`}
+              aria-pressed={project === "all"}
+              onClick={() => setProject("all")}
+            >
+              All projects
+            </button>
+            {projects.map((p) => (
+              <button
+                key={p}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${project === p ? "bg-white/15 text-fg" : "bg-white/[0.05] text-muted hover:text-fg"}`}
+                aria-pressed={project === p}
+                onClick={() => setProject(p)}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="space-y-1.5">
+          {filtered.slice(0, 8).map((s) => {
+            const key = `${s.source}:${s.session}`;
+            const active = key === activeKey;
+            const c = tint[s.source];
+            return (
+              <section
+                key={key}
+                className={`fade-in rounded-2xl transition-colors ${active ? "card space-y-2.5" : "tile !p-3 cursor-pointer hover:bg-white/[0.06]"}`}
+                style={active ? { background: c.bg, color: c.ink } : undefined}
+                onClick={() => { if (!active) setSelectedKey(key); }}
+              >
+                <div className="flex items-center gap-1.5 text-[12px] font-semibold">
+                  <ToolMark tool={s.source} />
+                  <span className="truncate">{s.project}</span>
+                  <span className={`ml-auto shrink-0 text-[10.5px] font-normal ${active ? "opacity-65" : "text-mute"}`}>
+                    {toolName[s.source]} · {since(s.updated_at)}
+                  </span>
+                </div>
+                <p className={`line-clamp-2 text-[12px] leading-snug ${active ? "opacity-90" : "text-muted"}`}>
+                  {s.title}
+                </p>
+                {active && (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {s.targets.map((t) => (
+                      <button
+                        key={t}
+                        className="btn btn-ink grow !py-2"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onPick({ source: s.source, session: s.session, targets: s.targets }, t);
+                        }}
+                      >
+                        <ToolMark tool={t} />Continue in {toolName[t]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   if (!offers.length) return null;
   return (
     <div className="space-y-2">
@@ -145,6 +250,7 @@ function RemoteRow({ repo, onCloned }: { repo: RepoStatus; onCloned: () => void 
 export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
   onView: (v: View) => void; onHandoff: (o: HandoffOffer, t: Tool) => void; onRepoHandoff: (r: RepoStatus, t: Tool) => void;
 }) {
+  const [sessions, setSessions] = useState<HandoffSession[]>([]);
   const [offers, setOffers] = useState<HandoffOffer[]>([]);
   const [repos, setRepos] = useState<RepoStatus[] | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -158,11 +264,16 @@ export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
     finally { setFetching(false); }
   }, []);
 
-  useEffect(() => {
+  const loadSessions = useCallback(() => {
+    api.listHandoffSessions().then((list) => setSessions(list.filter((x) => x.targets.length)), () => {});
     api.testHandoffOffers().then((o) => setOffers(o.filter((x) => x.targets.length)), () => {});
+  }, []);
+
+  useEffect(() => {
+    loadSessions();
     // Show what's here at once, then check GitHub for handoffs pushed from the cloud.
     load(false).then(() => load(true));
-  }, [load]);
+  }, [load, loadSessions]);
 
   async function add() {
     setErr("");
@@ -174,15 +285,15 @@ export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
     <div className="flex flex-col gap-2.5 p-3">
       <TopBar tab="handoffs" onView={onView} />
       <p className="px-1 text-[12px] leading-relaxed text-muted">
-        Hit a limit? Carry the work to another AI with its context: goal, changed files, what's left. Works for local sessions and for cloud agents on GitHub.
+        Pick the project and chat you want to carry over to another AI with its goal, changed files, and what's left.
       </p>
 
-      <LocalSessions offers={offers} onPick={onHandoff} />
+      <SessionPicker sessions={sessions} offers={offers} onPick={onHandoff} />
 
       <div className="flex items-center justify-between px-1 pt-1">
         <p className="eyebrow">Repos on this computer</p>
         <div className="flex items-center gap-0.5">
-          <button className="icon-btn" title="Check GitHub for new handoffs" aria-label="Check GitHub for new handoffs" disabled={fetching} onClick={() => load(true)}><RefreshIcon spin={fetching} /></button>
+          <button className="icon-btn" title="Refresh sessions and GitHub handoffs" aria-label="Refresh sessions and GitHub handoffs" disabled={fetching} onClick={() => { loadSessions(); load(true); }}><RefreshIcon spin={fetching} /></button>
           <button className="icon-btn" title="Add a repo" aria-label="Add a repo" onClick={add}><PlusIcon /></button>
         </div>
       </div>
@@ -198,20 +309,19 @@ export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
       )}
       {repos && (repos.some((r) => !r.local) ? (
         <>
-          <p className="eyebrow px-1 pt-1">On GitHub</p>
-          <section className="tile !p-1">
-            {repos.filter((r) => !r.local).slice(0, allRemote ? undefined : 5).map((r) => <RemoteRow key={r.id} repo={r} onCloned={() => load(false)} />)}
-            {!allRemote && repos.filter((r) => !r.local).length > 5 && (
-              <button className="w-full rounded-2xl py-2 text-[12px] text-muted hover:bg-white/[0.04] hover:text-fg" onClick={() => setAllRemote(true)}>
-                Show all {repos.filter((r) => !r.local).length}
+          <p className="eyebrow px-1 pt-2">On GitHub</p>
+          <div className="tile !p-1.5">
+            {repos.filter((r) => !r.local).slice(0, allRemote ? 999 : 6).map((r) => (
+              <RemoteRow key={r.id} repo={r} onCloned={() => load(false)} />
+            ))}
+            {!allRemote && repos.filter((r) => !r.local).length > 6 && (
+              <button className="w-full py-1.5 text-center text-[11.5px] text-muted hover:text-fg" onClick={() => setAllRemote(true)}>
+                Show all {repos.filter((r) => !r.local).length} repos
               </button>
             )}
-          </section>
-          <GithubConnect compact onChange={() => load(false)} />
+          </div>
         </>
-      ) : (
-        <GithubConnect onChange={() => load(true)} />
-      ))}
+      ) : <GithubConnect onChanged={() => load(false)} />)}
       {err && <p className="px-1 text-[11.5px] text-bad">{err}</p>}
     </div>
   );

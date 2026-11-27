@@ -60,6 +60,7 @@ export interface AuditResult { tool: Tool; current_plan: string; current_price: 
 export interface Entitlements { tier: Tier; trial_ends_at: string | null; trial_available: boolean; licence_status: string | null; max_devices: number }
 
 export interface HandoffOffer { source: Tool; session: string; targets: Tool[] }
+export interface HandoffSession { source: Tool; session: string; project: string; cwd: string; title: string; updated_at: number; targets: Tool[] }
 
 export interface Snapshot {
   agents: AgentRun[];

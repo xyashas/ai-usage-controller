@@ -104,3 +104,53 @@ fn voice_commands_after_answer_all_match() {
     assert_eq!(voice_intent("remember that I use Rust", true), Intent::Remember("I use Rust".into()));
     assert_eq!(voice_intent("save this", true), Intent::Save(String::new()));
 }
+
+#[test]
+fn handoff_list_sessions_filters_ask_tmp_and_prepares_chosen_session() {
+    use aiuc_core::handoff::{is_internal_ask_session, list_sessions, prepare};
+    use std::fs;
+    use tempfile::tempdir;
+
+    assert!(is_internal_ask_session(Some(r"C:\Users\me\AppData\Roaming\ai-usage-controller\ask-tmp"), None));
+    assert!(is_internal_ask_session(None, Some("You are a helpful assistant that lives in the user's menu bar (\"the notch\").")));
+    assert!(!is_internal_ask_session(Some("/workspace/acme-web"), Some("Fix checkout coupon rounding")));
+
+    let dir = tempdir().unwrap();
+    let proj_a = dir.path().join("acme-web");
+    let proj_b = dir.path().join("ai-usage-controller");
+    let ask_tmp = dir.path().join("ask-tmp");
+    fs::create_dir_all(&proj_a).unwrap();
+    fs::create_dir_all(&proj_b).unwrap();
+    fs::create_dir_all(&ask_tmp).unwrap();
+
+    let claude_root = dir.path().join("claude_logs");
+    let p_dir = claude_root.join("p1");
+    fs::create_dir_all(&p_dir).unwrap();
+
+    let write_claude = |name: &str, sess: &str, cwd: &Path, prompt: &str| {
+        let line = serde_json::json!({
+            "type": "user",
+            "sessionId": sess,
+            "cwd": cwd.to_string_lossy(),
+            "message": { "content": prompt }
+        });
+        fs::write(p_dir.join(format!("{name}.jsonl")), format!("{line}\n")).unwrap();
+    };
+
+    // Real sessions + one throwaway Ask-the-notch session
+    write_claude("sess-a", "sess-a", &proj_a, "Fix checkout coupon rounding before tax");
+    write_claude("sess-b", "sess-b", &proj_b, "Add project and session picker to handoff");
+    write_claude("sess-ask", "sess-ask", &ask_tmp, "You are a helpful assistant that lives in the user's menu bar (\"the notch\").");
+
+    let sessions = list_sessions(&[claude_root.clone()], Tool::ClaudeCode, 10);
+    assert_eq!(sessions.len(), 2, "ask-tmp session must be excluded");
+    assert!(sessions.iter().any(|s| s.session == "sess-a" && s.project == "acme-web" && s.title.contains("checkout")));
+    assert!(sessions.iter().any(|s| s.session == "sess-b" && s.project == "ai-usage-controller" && s.title.contains("session picker")));
+    assert!(!sessions.iter().any(|s| s.session == "sess-ask"));
+
+    // Preparing the specifically chosen session yields its exact project and goal
+    let (cwd, prompt) = prepare(&[claude_root], Tool::ClaudeCode, "sess-b").unwrap();
+    assert_eq!(cwd, proj_b);
+    assert!(prompt.contains("Add project and session picker to handoff"));
+    assert!(!prompt.contains("checkout"));
+}

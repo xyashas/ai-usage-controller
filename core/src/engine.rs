@@ -277,6 +277,7 @@ impl Engine {
         let mut seen: Vec<(DateTime<Utc>, PathBuf)> = Vec::new();
         for tool in [Tool::ClaudeCode, Tool::Codex] {
             for e in self.store.events(Some(tool), now - Duration::days(14), now + Duration::seconds(1))? {
+                if crate::handoff::is_internal_ask_session(e.project.as_deref(), None) { continue; }
                 let Some(p) = e.project.as_deref().map(PathBuf::from).filter(|p| p.is_absolute()) else { continue };
                 match seen.iter_mut().find(|(_, q)| *q == p) {
                     Some(entry) => entry.0 = entry.0.max(e.ts),
@@ -295,7 +296,7 @@ impl Engine {
                 continue;
             }
             let recent = self.store.events(Some(tool), now - Duration::hours(24), now + Duration::seconds(1))?;
-            if let Some(e) = recent.iter().rev().find(|e| e.ts <= now) {
+            if let Some(e) = recent.iter().rev().find(|e| e.ts <= now && !crate::handoff::is_internal_ask_session(e.project.as_deref(), None)) {
                 let targets = crate::handoff::targets(tool);
                 out.push(crate::snapshot::HandoffOffer { source: tool, session: e.session_id.clone(), targets });
             }

@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Pref, BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, CiRun, InboxItem, Suggestion, Watch } from "./types";
+import type { Pref, BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffSession, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, CiRun, InboxItem, Suggestion, Watch } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -16,6 +16,7 @@ export const api = {
   previewHandoff: (source: Tool, session: string, target: Tool, test = false) => call<HandoffPreviewData>("preview_handoff", { source, session, target, test }),
   previewRepoHandoff: (path: string, target: Tool) => call<HandoffPreviewData>("preview_repo_handoff", { path, target }),
   testHandoffOffers: () => call<HandoffOffer[]>("test_handoff_offers"),
+  listHandoffSessions: () => call<HandoffSession[]>("list_handoff_sessions"),
   launchHandoff: (id: number, prompt: string, dest: Dest) => call<string>("launch_handoff", { id, prompt, dest }),
   planDispatch: (text: string, repo: string | null) => call<DispatchPlan>("plan_dispatch", { text, repo }),
   runDispatch: (repo: string, tasks: { text: string; tool: Tool; dest: Dest; queue?: boolean }[], worktrees: boolean) => call<Started[]>("run_dispatch", { repo, tasks, worktrees }),
@@ -373,8 +374,27 @@ function mockAnswer(req: AskRequest) {
 
 function mock(cmd: string, args?: Record<string, unknown>): unknown {
   switch (cmd) {
-    case "test_handoff_offers": return [{ source: "claude_code", session: "s", targets: ["codex", "gemini"] }];
-    case "preview_handoff":
+    case "test_handoff_offers": return [{ source: "claude_code", session: "sess-checkout", targets: ["codex", "gemini"] }];
+    case "list_handoff_sessions": return mockScenario === "empty" ? [] : [
+      { source: "claude_code", session: "sess-checkout", project: "acme-web", cwd: "/Users/me/acme-web", title: "Fix checkout coupon rounding before tax and add unit tests", updated_at: Math.floor(Date.now() / 1000) - 420, targets: ["codex", "gemini"] },
+      { source: "codex", session: "sess-voice", project: "ai-usage-controller", cwd: "/Users/me/ai-usage-controller", title: "Add local Whisper fallback and Windows mic diagnostics", updated_at: Math.floor(Date.now() / 1000) - 1800, targets: ["claude_code", "gemini"] },
+      { source: "claude_code", session: "sess-auth", project: "acme-web", cwd: "/Users/me/acme-web", title: "Refactor OAuth token refresh retry loop", updated_at: Math.floor(Date.now() / 1000) - 7200, targets: ["codex", "gemini"] },
+    ];
+    case "preview_handoff": {
+      const sess = String(args?.session ?? "");
+      if (sess === "sess-voice") {
+        return {
+          id: 2, place: "ai-usage-controller",
+          prompt: "# Session handoff\n\n## Original goal\n- Add local Whisper fallback and Windows mic diagnostics\n\n## Files created or edited\n- app/src-tauri/src/voice.rs\n- app/src-tauri/src/whisper_local.rs\n\n## TODO\n- [ ] Verify end-to-end on Windows 11",
+          destinations: [{ dest: "app", label: "Claude app" }, { dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }],
+        };
+      }
+      return {
+        id: 1, place: "acme-web",
+        prompt: "# Session handoff\n\n## Original goal\n- Fix checkout coupon rounding before tax and add unit tests\n\n## Files created or edited\n- src/checkout/total.ts\n- src/checkout/total.test.ts\n\n## TODO\n- [ ] Run the checkout tests",
+        destinations: (args!.target as Tool) === "gemini" ? [{ dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }] : [{ dest: "app", label: (args!.target as Tool) === "codex" ? "Codex app" : "Claude app" }, { dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }],
+      };
+    }
     case "preview_repo_handoff": return {
       id: 1, place: cmd === "preview_handoff" ? "acme-api" : "acme/web · claude/fix-login",
       prompt: "# Session handoff\n\n## Original goal\nFix the checkout flow so coupons apply before tax.\n\n## Files created or edited\n- src/checkout/total.ts\n- src/checkout/total.test.ts\n\n## TODO\n- [ ] Run the checkout tests\n- [ ] Update the changelog",

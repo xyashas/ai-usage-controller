@@ -114,13 +114,15 @@ async fn preview_handoff(window: tauri::WebviewWindow, state: State<'_, AppState
             let mut eng = engine.lock().map_err(err)?;
             // Test mode (Check setup) offers the latest session whatever the usage;
             // otherwise the offer must come from the live snapshot.
-            let offers = if test.unwrap_or(false) {
-                eng.test_handoff_offers(Utc::now()).map_err(err)?
+            if test.unwrap_or(false) {
+                if !aiuc_core::handoff::targets(source).contains(&target) {
+                    return Err("The available destination changed.".into());
+                }
             } else {
-                eng.snapshot(Utc::now()).map_err(err)?.handoffs
-            };
-            if !offers.iter().any(|o| o.source == source && o.session == session && o.targets.contains(&target)) {
-                return Err("The session or available destination changed.".into());
+                let offers = eng.snapshot(Utc::now()).map_err(err)?.handoffs;
+                if !offers.iter().any(|o| o.source == source && o.session == session && o.targets.contains(&target)) {
+                    return Err("The session or available destination changed.".into());
+                }
             }
             eng.roots(source)
         };
@@ -133,6 +135,32 @@ async fn preview_handoff(window: tauri::WebviewWindow, state: State<'_, AppState
 #[tauri::command]
 fn test_handoff_offers(state: State<AppState>) -> CmdResult<Vec<aiuc_core::snapshot::HandoffOffer>> {
     state.engine.lock().map_err(err)?.test_handoff_offers(Utc::now()).map_err(err)
+}
+
+#[tauri::command]
+async fn list_handoff_sessions(state: State<'_, AppState>) -> CmdResult<Vec<aiuc_core::handoff::SessionInfo>> {
+    let engine = state.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (claude_roots, codex_roots, claude_on, codex_on) = {
+            let eng = engine.lock().map_err(err)?;
+            (
+                eng.roots(Tool::ClaudeCode),
+                eng.roots(Tool::Codex),
+                eng.settings.tool(Tool::ClaudeCode).enabled,
+                eng.settings.tool(Tool::Codex).enabled,
+            )
+        };
+        let mut all = Vec::new();
+        if claude_on {
+            all.extend(aiuc_core::handoff::list_sessions(&claude_roots, Tool::ClaudeCode, 15));
+        }
+        if codex_on {
+            all.extend(aiuc_core::handoff::list_sessions(&codex_roots, Tool::Codex, 15));
+        }
+        all.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
+        all.truncate(20);
+        Ok(all)
+    }).await.map_err(err)?
 }
 
 #[tauri::command]
@@ -848,6 +876,7 @@ pub fn run() {
             get_snapshot,
             preview_handoff,
             test_handoff_offers,
+            list_handoff_sessions,
             launch_handoff,
             list_repos,
             setup_repo,

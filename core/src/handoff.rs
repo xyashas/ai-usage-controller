@@ -347,3 +347,157 @@ pub fn exclude_from_git(cwd: &Path) -> Result<bool> {
     }
     Ok(true)
 }
+
+/// True for internal "Ask the notch" / voice / council throwaway CLI sessions
+/// (run inside `<app_data>/ask-tmp`), which should never pollute project or session handoffs.
+pub fn is_internal_ask_session(cwd: Option<&str>, prompt: Option<&str>) -> bool {
+    if let Some(c) = cwd {
+        let lower = c.replace('\\', "/").to_lowercase();
+        if lower.ends_with("/ask-tmp") || lower.contains("/ask-tmp/") || lower == "ask-tmp" {
+            return true;
+        }
+    }
+    if let Some(t) = prompt {
+        let trimmed = t.trim_start();
+        if trimmed.starts_with("You are a helpful assistant that lives in the user's menu bar")
+            || trimmed.starts_with("You are a friendly tutor guiding the user")
+            || trimmed.starts_with("Three AI assistants answered the same question")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SessionInfo {
+    pub source: Tool,
+    pub session: String,
+    pub project: String,
+    pub cwd: String,
+    pub title: String,
+    pub updated_at: i64,
+    pub targets: Vec<Tool>,
+}
+
+fn first_prompt_and_cwd(path: &Path, source: Tool, session: &str) -> (Option<PathBuf>, String) {
+    let Ok(file) = File::open(path) else { return (None, String::new()) };
+    let mut summary = Summary::default();
+    let mut matched = source != Tool::Codex;
+    for line in BufReader::new(file).lines().take(200) {
+        let Ok(line) = line else { break };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        if source == Tool::ClaudeCode {
+            summary.claude(&v, session);
+        } else {
+            if v["type"] == "session_meta" {
+                if v["payload"]["id"].as_str() == Some(session) {
+                    matched = true;
+                } else {
+                    break;
+                }
+            }
+            if matched {
+                summary.codex(&v);
+            }
+        }
+        if summary.cwd.is_some() && !summary.original.is_empty() {
+            break;
+        }
+    }
+    (summary.cwd, summary.original)
+}
+
+/// Recent real coding sessions (Claude Code or Codex) the user can pick from to hand off.
+/// Skips Ask-the-notch internal throwaway runs (`ask-tmp`) and empty sessions.
+pub fn list_sessions(roots: &[PathBuf], source: Tool, limit: usize) -> Vec<SessionInfo> {
+    if !matches!(source, Tool::ClaudeCode | Tool::Codex) {
+        return Vec::new();
+    }
+    let targets = targets(source);
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    let mut files: Vec<(i64, PathBuf, String)> = Vec::new();
+    for root in roots {
+        if !root.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(root)
+            .max_depth(if source == Tool::Codex { 5 } else { 2 })
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+        {
+            let Some(name) = entry.file_name().to_str() else { continue };
+            let session = match source {
+                Tool::ClaudeCode => name.strip_suffix(".jsonl").map(str::to_owned),
+                Tool::Codex => {
+                    if !name.starts_with("rollout-") || !name.ends_with(".jsonl") {
+                        None
+                    } else {
+                        // rollout-YYYY-MM-DDTHH-MM-SS-<session_id>.jsonl -> read id from session_meta or filename tail
+                        let stem = name.trim_end_matches(".jsonl");
+                        stem.rfind('-').map(|i| stem[i + 1..].to_owned())
+                    }
+                }
+                Tool::Gemini => None,
+            };
+            let Some(mut sess_id) = session else { continue };
+            let mtime = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            // For Codex, UUID session IDs contain hyphens, so extract exact id from session_meta if available
+            if source == Tool::Codex {
+                if let Ok(f) = File::open(entry.path()) {
+                    for l in BufReader::new(f).lines().take(5).flatten() {
+                        if let Ok(v) = serde_json::from_str::<Value>(&l) {
+                            if v["type"] == "session_meta" {
+                                if let Some(id) = v["payload"]["id"].as_str() {
+                                    sess_id = id.to_owned();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            files.push((mtime, entry.into_path(), sess_id));
+        }
+    }
+    files.sort_by_key(|(m, _, _)| std::cmp::Reverse(*m));
+
+    let mut out = Vec::new();
+    for (updated_at, path, session) in files {
+        if out.len() >= limit {
+            break;
+        }
+        let (cwd_opt, title) = first_prompt_and_cwd(&path, source, &session);
+        let Some(cwd) = cwd_opt.filter(|p| p.is_absolute() && p.is_dir()) else { continue };
+        let cwd_str = cwd.to_string_lossy().into_owned();
+        if is_internal_ask_session(Some(&cwd_str), Some(&title)) || title.trim().is_empty() {
+            continue;
+        }
+        let project = cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&cwd_str)
+            .to_owned();
+        let clipped: String = title.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(100).collect();
+        out.push(SessionInfo {
+            source,
+            session,
+            project,
+            cwd: cwd_str,
+            title: clipped,
+            updated_at,
+            targets: targets.clone(),
+        });
+    }
+    out
+}

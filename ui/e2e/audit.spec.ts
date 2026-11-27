@@ -308,3 +308,24 @@ test.describe("Voice & Ask regression flows", () => {
     expect(errors).toEqual([]);
   });
 });
+
+test.describe("Handoff project & session picker", () => {
+  test("filter by project, pick a specific chat, and preview its exact handoff", async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto("/?view=handoffs&scenario=normal", { waitUntil: "networkidle" });
+    await page.waitForTimeout(250);
+    await expect(page.getByText(/Choose a chat to hand off/i)).toBeVisible();
+    // Filter to ai-usage-controller project
+    await page.getByRole("button", { name: "ai-usage-controller" }).click();
+    await page.waitForTimeout(150);
+    await expect(page.getByText(/Add local Whisper fallback/i)).toBeVisible();
+    await expect(page.getByText(/Fix checkout coupon rounding/i)).toHaveCount(0);
+    // Continue in Claude -> verify HandoffPreview loads that exact session's prompt
+    await page.getByRole("button", { name: /Continue in Claude/i }).click();
+    await page.waitForTimeout(250);
+    const textarea = page.locator("textarea[aria-label='Handoff prompt']");
+    await expect(textarea).toBeVisible();
+    await expect(textarea).toHaveValue(/Add local Whisper fallback and Windows mic diagnostics/);
+    expect(errors).toEqual([]);
+  });
+});
