@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, Suggestion, Watch } from "./types";
+import type { BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, CiRun, Suggestion, Watch } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -66,6 +66,8 @@ export const api = {
   addWatch: (text: string) => call<Watch>("add_watch", { text }),
   listWatches: () => call<Watch[]>("list_watches"),
   removeWatch: (id: string) => call<void>("remove_watch", { id }),
+  ciRuns: () => call<CiRun[]>("ci_runs"),
+  ciLog: (runId: number) => call<string>("ci_log", { runId }),
   alertAction: (alert: Alert) => call<string>("alert_action", { id: alert.id }),
   acceptNudge: () => call<void>("accept_nudge"),
   acceptAudit: (tool: Tool) => call<void>("accept_audit", { tool }),
@@ -173,6 +175,8 @@ let mockSettings: Settings = {
   ask_screenshots: true,
   polish_auto: false,
   suggest_chips: true,
+  autopilot: true,
+  ci_watch: true,
 };
 const dismissed = new Set<string>();
 let mockWatches: Watch[] = [
@@ -288,6 +292,7 @@ function mockSnapshot(): Snapshot {
     suggestions: mockSettings.suggest_chips && mockScenario === "critical" ? [
       { id: "limit-mid-task:claude_code:codex", kind: { kind: "limit_mid_task", tool: "claude_code", to: "codex" }, title: "Hand off to Codex?", detail: "Claude at 96% mid-task", action: "handoff" },
     ] : [],
+    autopilot_moves: mockScenario === "critical" ? [{ task_id: 2, to: "codex", at: inMin(-3) }] : [],
   };
 }
 
@@ -424,6 +429,11 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       return w;
     }
     case "remove_watch": mockWatches = mockWatches.filter((w) => w.id !== args!.id); return null;
+    case "ci_runs": return mockScenario === "empty" ? [] : [
+      { id: 901, repo: "acme/web", branch: "agents/fix-failing-checkout-test", name: "CI", status: "completed", conclusion: "failure", html_url: "https://github.com/acme/web/actions/runs/901", updated_at: inMin(-4) },
+      { id: 902, repo: "acme/web", branch: "gemini/autopilot-ci", name: "CI", status: "completed", conclusion: "success", html_url: "https://github.com/acme/web/actions/runs/902", updated_at: inMin(-18) },
+    ];
+    case "ci_log": return "test checkout::coupon_before_tax ... FAILED\nassertion `left == right` failed\n  left: 108.0\n right: 97.2";
     case "accept_nudge": dismissed.add("nudge"); return null;
     case "alert_action": dismissed.add(args!.id as string); return "ok";
     case "start_trial": mockTier = "trial"; return null;

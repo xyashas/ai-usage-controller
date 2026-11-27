@@ -89,6 +89,10 @@ pub struct Settings {
     pub polish_auto: bool,
     /// Show proactive suggestion chips sliding down from the notch.
     pub suggest_chips: bool,
+    /// Hand off terminal tasks automatically when a tool hits its limit.
+    pub autopilot: bool,
+    /// Watch GitHub Actions CI runs on agent branches.
+    pub ci_watch: bool,
 }
 
 impl Default for Settings {
@@ -118,6 +122,8 @@ impl Default for Settings {
             show_daily_recap: true,
             polish_auto: false,
             suggest_chips: true,
+            autopilot: true,
+            ci_watch: true,
         }
     }
 }

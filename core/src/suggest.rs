@@ -24,6 +24,8 @@ pub struct Suggestion {
     pub detail: String,
     /// "ask_fix" | "send_failure" | "handoff"
     pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub text: Option<String>,
 }
 
 fn short_tool(tool: Tool) -> &'static str {
@@ -135,6 +137,7 @@ pub fn from_snapshot(snap: &Snapshot, now: DateTime<Utc>) -> Vec<Suggestion> {
                 title,
                 detail: format!("{} tests did not pass", short_tool(a.tool)),
                 action: "send_failure".into(),
+                text: None,
             });
         }
     }
@@ -177,6 +180,7 @@ pub fn from_snapshot(snap: &Snapshot, now: DateTime<Utc>) -> Vec<Suggestion> {
                 title: format!("Hand off to {}?", short_tool(to)),
                 detail: format!("{} at {:.0}% mid-task", short_tool(t.tool), used_pct),
                 action: "handoff".into(),
+                text: None,
             });
         }
     }

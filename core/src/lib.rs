@@ -11,6 +11,8 @@
 //! which never leaves the machine.
 
 pub mod advice;
+pub mod autopilot;
+pub mod ci;
 pub mod agent_status;
 pub mod ask;
 pub mod dispatch;

@@ -171,4 +171,5 @@ pub struct Snapshot {
     pub daily_recap: Option<crate::recap::DailyRecap>,
     pub weekly_recap: crate::recap::WeeklyRecap,
     pub suggestions: Vec<crate::suggest::Suggestion>,
+    pub autopilot_moves: Vec<crate::autopilot::MovedRecord>,
 }

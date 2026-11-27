@@ -106,6 +106,7 @@ pub fn spawn(app: AppHandle, engine: Arc<Mutex<Engine>>) {
                             title: "Fix this error?".into(),
                             detail: "Copied error detected".into(),
                             action: "ask_fix".into(),
+                            text: None,
                         };
                         let _ = app.emit("suggestion", &suggestion);
                     }
