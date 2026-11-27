@@ -50,9 +50,11 @@ Browser mock URL params (ui/src/api.ts): `?scenario=runaway|low|critical|unconne
 CLI: `cargo run -p aiuc-core --bin aiuc -- paths|status [--json]|watch|plan <tool> <plan>|audit|trial`.
 Set `AIUC_DATA_DIR=/some/dir` to use a throwaway database.
 
-CI (`.github/workflows/ci.yml`): core tests on Linux/macOS/Windows, unsigned
-macOS universal + Windows installers uploaded as artifacts
-(`bundles-macos-latest`, `bundles-windows-latest`), Linux compile check, ui/api/web.
+CI (`.github/workflows/ci.yml`): core tests on Linux/Windows, unsigned Windows
+installer artifact (`bundles-windows-latest`), Linux compile check, ui/api/web.
+macOS (core tests + universal `.dmg` as `bundles-macos-latest`) runs only via
+Actions → CI → Run workflow with "Build for Mac" ticked: Mac minutes cost 10×,
+and the owner chose to save them for now.
 `release.yml`: tag `v*` → signed draft release (needs secrets, see docs/RELEASING.md).
 **Always keep CI green; run the relevant tests before pushing.**
 

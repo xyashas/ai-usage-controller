@@ -136,7 +136,7 @@ npm test --prefix api          # 6 tests: tables, waitlist, full team flow, pers
 npm test --prefix web          # 10 tests: ccusage parsing and the waste recommendations
 ```
 
-CI runs the core tests on Linux, macOS and Windows and builds unsigned Mac (universal) and Windows installers on every push.
+CI runs the core tests on Linux and Windows and builds the unsigned Windows installer on every pull request. The Mac build (10× the Actions minutes) runs only on request: Actions → CI → Run workflow → tick "Build for Mac".
 
 ## How the numbers work
 
