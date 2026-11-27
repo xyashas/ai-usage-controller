@@ -25,7 +25,7 @@ function LocalSessions({ offers, onPick }: { offers: HandoffOffer[]; onPick: (o:
   if (!offers.length) return null;
   return (
     <div className="space-y-2">
-      <p className="eyebrow px-1">On this computer</p>
+      <p className="eyebrow px-1">Latest sessions</p>
       {offers.map((o) => {
         const c = tint[o.source];
         return (
@@ -180,7 +180,7 @@ export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
       <LocalSessions offers={offers} onPick={onHandoff} />
 
       <div className="flex items-center justify-between px-1 pt-1">
-        <p className="eyebrow">On this computer</p>
+        <p className="eyebrow">Repos on this computer</p>
         <div className="flex items-center gap-0.5">
           <button className="icon-btn" title="Check GitHub for new handoffs" aria-label="Check GitHub for new handoffs" disabled={fetching} onClick={() => load(true)}><RefreshIcon spin={fetching} /></button>
           <button className="icon-btn" title="Add a repo" aria-label="Add a repo" onClick={add}><PlusIcon /></button>
