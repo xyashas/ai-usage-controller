@@ -130,6 +130,7 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
       <Section title="Widget">
         <Toggle label="Launch at login" on={s.launch_at_login} set={(v) => update({ ...s, launch_at_login: v })} />
         <Toggle label="Hide pill when no AI tool has been used for 30 min" on={s.hide_when_idle} set={(v) => update({ ...s, hide_when_idle: v })} />
+        <Toggle label="Show daily recap" on={s.show_daily_recap} set={(v) => update({ ...s, show_daily_recap: v })} />
         {saveError && <p role="alert" className="text-xs text-bad">{saveError}</p>}
 
         <Row label="Open panel">

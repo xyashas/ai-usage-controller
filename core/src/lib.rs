@@ -26,6 +26,7 @@ pub mod paths;
 pub mod plans;
 pub mod repo_handoff;
 pub mod pricing;
+pub mod recap;
 pub mod runaway;
 pub mod scanner;
 pub mod settings;

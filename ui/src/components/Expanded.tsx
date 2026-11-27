@@ -3,7 +3,8 @@ import { Approvals } from "./Approvals";
 import type { Alert, HandoffOffer, RepoStatus, Snapshot, Tool, ToolStatus, WindowStatus } from "../types";
 import type { View } from "../App";
 import { ToolMark } from "./ToolMark";
-import { UsageHistory } from "./UsageHistory";
+import { UsageHistory, WeeklyRecapSection } from "./UsageHistory";
+import { DailyRecap } from "./DailyRecap";
 import { ClaudeConnect } from "./ClaudeConnect";
 import { TopBar } from "./TopBar";
 import { countdown, usd, usedPct } from "../format";
@@ -263,6 +264,8 @@ export function Expanded({ snap, onView, refresh, onHandoff, onRepoHandoff }: {
     <div className="flex flex-col gap-2.5 p-3">
       <TopBar tab="panel" onView={onView} />
 
+      {snap.daily_recap && <DailyRecap recap={snap.daily_recap} onDismiss={async () => { await api.dismissDailyRecap(); refresh(); }} />}
+
       {alert && <AlertCard alert={alert} snap={snap} offer={alertOffer} cloud={cloud} onHandoff={onHandoff} onRepoHandoff={onRepoHandoff} refresh={refresh} />}
 
       <Approvals items={snap.approvals} refresh={refresh} />
@@ -300,6 +303,8 @@ export function Expanded({ snap, onView, refresh, onHandoff, onRepoHandoff }: {
           <Stat label="Priciest" value={snap.today.top_session ? usd(snap.today.top_session.cost_usd) : paid ? "—" : "Pro"} hint={snap.today.top_session?.project_name ?? ""} />
         </section>
       )}
+
+      <WeeklyRecapSection recap={snap.weekly_recap} />
 
       {snap.nudge && (
         <section className="tile flex items-center gap-3">

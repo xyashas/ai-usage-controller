@@ -168,4 +168,6 @@ pub struct Snapshot {
     /// Feature ids hidden for this tier.
     pub locked: Vec<String>,
     pub remote: Option<RemoteSummary>,
+    pub daily_recap: Option<crate::recap::DailyRecap>,
+    pub weekly_recap: crate::recap::WeeklyRecap,
 }

@@ -49,6 +49,7 @@ export const api = {
   refreshNow: () => call<void>("refresh_now"),
   diagnostics: () => call<Diagnostics>("diagnostics"),
   dismiss: (id: string) => call<void>("dismiss_alert", { id }),
+  dismissDailyRecap: () => call<void>("dismiss_daily_recap"),
   alertAction: (alert: Alert) => call<string>("alert_action", { id: alert.id }),
   acceptNudge: () => call<void>("accept_nudge"),
   acceptAudit: (tool: Tool) => call<void>("accept_audit", { tool }),
@@ -120,6 +121,7 @@ let mockSettings: Settings = {
   agent_status: mockScenario !== "unconnected",
   approvals: true,
   verify_done: true,
+  show_daily_recap: true,
 };
 const dismissed = new Set<string>();
 let mockGithub: string | null = null;
@@ -204,6 +206,31 @@ function mockSnapshot(): Snapshot {
     projected_saving_usd: 112,
     locked: paid ? [] : ["time_to_cutoff", "switchboard", "runaway", "session_meter", "model_nudge", "plan_audit", "savings", "custom_alerts"],
     remote: null,
+    daily_recap: tools.length && mockSettings.show_daily_recap && !dismissed.has("daily_recap") ? {
+      date: now().toISOString().slice(0, 10),
+      tools: [
+        { tool: "claude_code", label: "Claude", requests: 184, cost_usd: 14.6, five_hour_peak_pct: 84, weekly_peak_pct: 38, five_hour_resets_at: inMin(132), weekly_resets_at: null },
+        ...(paid ? [
+          { tool: "codex" as Tool, label: "Codex", requests: 42, cost_usd: 2.9, five_hour_peak_pct: 28, weekly_peak_pct: 14, five_hour_resets_at: inMin(201), weekly_resets_at: null },
+          { tool: "gemini" as Tool, label: "Gemini", requests: 96, cost_usd: 0.35, five_hour_peak_pct: 6, weekly_peak_pct: null, five_hour_resets_at: inMin(600), weekly_resets_at: null },
+        ] : []),
+      ],
+      open_tasks_yesterday: 2,
+      suggestion: paid ? "Codex has the most room this morning" : "Claude has room to start your day",
+    } : null,
+    weekly_recap: tools.length ? {
+      tools: [
+        { tool: "claude_code", label: "Claude", this_week_requests: 812, last_week_requests: 640, this_week_cost_usd: 64.2, last_week_cost_usd: 51.8, change_pct: 23.9, five_hour_hits: 2, weekly_hits: 0 },
+        ...(paid ? [
+          { tool: "codex" as Tool, label: "Codex", this_week_requests: 194, last_week_requests: 220, this_week_cost_usd: 12.4, last_week_cost_usd: 14.6, change_pct: -15.1, five_hour_hits: 0, weekly_hits: 0 },
+          { tool: "gemini" as Tool, label: "Gemini", this_week_requests: 410, last_week_requests: 0, this_week_cost_usd: 1.2, last_week_cost_usd: 0, change_pct: null, five_hour_hits: 0, weekly_hits: 0 },
+        ] : []),
+      ],
+      busiest_hours: [{ hour: 10, requests: 218 }, { hour: 15, requests: 184 }, { hour: 11, requests: 162 }],
+      hourly_requests: [6, 2, 0, 0, 0, 0, 4, 18, 54, 112, 218, 162, 95, 118, 140, 184, 132, 86, 48, 24, 16, 12, 8, 4],
+      handoffs_count: 3,
+      total_limit_hits: 2,
+    } : { tools: [], busiest_hours: [], hourly_requests: Array(24).fill(0), handoffs_count: 0, total_limit_hits: 0 },
   };
 }
 
@@ -283,6 +310,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       { tool: "gemini", label: "Gemini", found: false, roots: [] },
     ];
     case "dismiss_alert": dismissed.add(args!.id as string); return null;
+    case "dismiss_daily_recap": dismissed.add("daily_recap"); return null;
     case "accept_nudge": dismissed.add("nudge"); return null;
     case "alert_action": dismissed.add(args!.id as string); return "ok";
     case "start_trial": mockTier = "trial"; return null;

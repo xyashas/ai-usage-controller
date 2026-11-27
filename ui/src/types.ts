@@ -81,6 +81,8 @@ export interface Snapshot {
   projected_saving_usd: number;
   locked: string[];
   remote: { today_cost_all_devices: number; month_cost_all_devices: number; devices: number } | null;
+  daily_recap: DailyRecap | null;
+  weekly_recap: WeeklyRecap;
 }
 
 export interface Plan { id: string; name: string; price: number; capacity: number; metered?: boolean; daily_requests?: number | null }
@@ -101,6 +103,7 @@ export interface Settings {
   agent_status: boolean;
   approvals: boolean;
   verify_done: boolean;
+  show_daily_recap: boolean;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
 export type Mode = "collapsed" | "expanded";
@@ -153,3 +156,39 @@ export interface DispatchPlan { tasks: Routed[]; rooms: ToolRoom[]; dests: Recor
 export interface Started { text: string; tool: Tool; dest: Dest; branch: string | null; message: string | null; delivered: boolean; error: string | null }
 export interface GithubStatus { login: string | null; cli: boolean; device_flow: boolean }
 export interface DeviceCode { device_code: string; user_code: string; verification_uri: string; interval: number }
+
+export interface DailyToolUsage {
+  tool: Tool;
+  label: string;
+  requests: number;
+  cost_usd: number;
+  five_hour_peak_pct: number | null;
+  weekly_peak_pct: number | null;
+  five_hour_resets_at: string | null;
+  weekly_resets_at: string | null;
+}
+export interface DailyRecap {
+  date: string;
+  tools: DailyToolUsage[];
+  open_tasks_yesterday: number;
+  suggestion: string;
+}
+export interface WeeklyToolComparison {
+  tool: Tool;
+  label: string;
+  this_week_requests: number;
+  last_week_requests: number;
+  this_week_cost_usd: number;
+  last_week_cost_usd: number;
+  change_pct: number | null;
+  five_hour_hits: number;
+  weekly_hits: number;
+}
+export interface HourBucket { hour: number; requests: number }
+export interface WeeklyRecap {
+  tools: WeeklyToolComparison[];
+  busiest_hours: HourBucket[];
+  hourly_requests: number[];
+  handoffs_count: number;
+  total_limit_hits: number;
+}

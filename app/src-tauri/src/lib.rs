@@ -70,6 +70,11 @@ fn get_snapshot(state: State<AppState>) -> CmdResult<Snapshot> {
     snapshot_now(&state)
 }
 
+#[tauri::command]
+fn dismiss_daily_recap(state: State<AppState>) -> CmdResult<()> {
+    state.engine.lock().map_err(err)?.dismiss_daily_recap(Utc::now()).map_err(err)
+}
+
 #[derive(Serialize)]
 struct Preview {
     id: u64,
@@ -129,6 +134,7 @@ async fn launch_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>
         let draft = guard.as_ref().filter(|d| d.id == id).ok_or("Preview this session again.")?;
         let auto = engine.lock().map_err(err)?.settings.auto_send;
         let msg = handoff::launch(draft.cwd.as_deref(), draft.target, dest, &prompt, auto)?;
+        if let Ok(eng) = engine.lock() { let _ = eng.record_handoff(Utc::now()); }
         *guard = None;
         Ok(msg)
     }).await.map_err(err)?
@@ -833,6 +839,7 @@ pub fn run() {
             layout,
             platform,
             dismiss_alert,
+            dismiss_daily_recap,
             alert_action,
             accept_nudge,
             accept_audit,

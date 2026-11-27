@@ -81,6 +81,8 @@ pub struct Settings {
     pub approvals: bool,
     /// Run the project's tests when an agent finishes, and show if they passed.
     pub verify_done: bool,
+    /// Show the daily morning brief card at the top of Usage each day.
+    pub show_daily_recap: bool,
 }
 
 impl Default for Settings {
@@ -106,6 +108,7 @@ impl Default for Settings {
             agent_status: false,
             approvals: true,
             verify_done: true,
+            show_daily_recap: true,
         }
     }
 }
