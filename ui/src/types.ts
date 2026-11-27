@@ -106,6 +106,7 @@ export interface Settings {
   approvals: boolean;
   verify_done: boolean;
   ask_screenshots: boolean;
+  ask_memory: boolean;
   show_daily_recap: boolean;
   polish_auto: boolean;
   suggest_chips: boolean;
@@ -253,3 +254,6 @@ export interface BuddyState {
   said: string; text: string; cursor: [number, number]; spots: BuddySpot[]; step: number; id: string; speak: string;
 }
 export interface VoiceTurn { question: string; answer: string; tool: Tool | null; reason: string }
+
+/** Something you asked Ask to remember about you. Stored only on this computer. */
+export interface Pref { id: number; text: string; at: string }

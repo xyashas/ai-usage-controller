@@ -374,6 +374,21 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    points on a window screenshot are mapped to monitor fractions. The last voice
    turn (3 min) is loaded into the Ask panel on the next tap. `ask::answer` is the
    shared "try the next tool" runner used by Ask, voice and guide. Mac voice later.
+1l. **Voice commands, memory, inbox** (Claude: `ask::{voice_intent,Intent,redo_question}`,
+   `core/src/memory.rs`, `app ask::{handle_note,memory_*}`, `buddy::{voice_ask,
+   speak_answer,last_answer}`; Gemini: `core/src/inbox.rs` + inbox UI). Every
+   spoken sentence (and typed "remember that…/save this" in the panel) goes
+   through `voice_intent` first: about the last answer (from voice or the panel,
+   10 min) "paste that" / "paste the code" (refocus + Ctrl+V), "copy that",
+   "shorter / more casual / translate it to X" (redo with the last turn as
+   history), "send it to Codex", "say that again", "stop"; "remember that I…" /
+   "always…" / "I prefer…" → `memory::add`; "forget…" → `forget_matching` or
+   clear; "remind me…" → a watch if `watch::parse` understands it, else the
+   inbox; "save this" → `inbox::capture` (the selection, clipboard or last answer
+   when nothing is said). Preferences are added to every Ask prompt as
+   `<about_me>` when `settings.ask_memory` (Settings → Ask lists them, with
+   delete). Privacy: preferences (`kv` "ask_prefs") and inbox items (`kv`
+   "inbox") are text you chose to save; both stay on this computer, never sync.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).

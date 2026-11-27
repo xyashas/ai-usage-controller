@@ -5,6 +5,7 @@ use crate::capture::{self, Captured};
 use crate::{err, handoff, AppState, CmdResult};
 use aiuc_core::ask::{self, Action, Context, Mode, Pick, Room, StreamReader, Turn};
 use aiuc_core::model::Tool;
+use aiuc_core::{inbox, memory};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -44,7 +45,7 @@ pub fn prepare(state: &AppState, question: &str, action: Action, history: &[Turn
     let work = ask::about_work(question).then(|| {
         state.last.lock().ok().and_then(|l| l.clone()).map(|s| ask::work_brief(&s, &failures(state), chrono::Utc::now()))
     }).flatten();
-    let ctx = context_for(&c, current_repo(state));
+    let ctx = context_for(&c, current_repo(state), about_me(state));
     let q = if extra.is_empty() { question.to_owned() } else { format!("{question}\n\n({extra})") };
     let prompt = ask::build_prompt(&q, action, &ctx, history, work.as_deref());
     Some((rooms, pick, prompt, c.screenshot.clone().or(c.clipboard_image.clone())))
@@ -79,6 +80,85 @@ pub struct ContextView {
     /// Which tool would answer now, and why.
     pub pick: Option<Pick>,
     pub installed: Vec<Tool>,
+}
+
+/// What you asked Ask to remember, for the prompt (if that's switched on).
+fn about_me(state: &AppState) -> Option<String> {
+    let e = state.engine.lock().ok()?;
+    if !e.settings.ask_memory { return None; }
+    memory::prompt_block(&memory::list(&e.store))
+}
+
+/// "Remember that…", "forget…", "save this…": handled here, with no AI call.
+/// Returns what to tell you, or None when it's an ordinary question.
+pub fn handle_note(state: &AppState, intent: &ask::Intent, c: &Captured) -> Option<Result<String, String>> {
+    use ask::Intent;
+    let mut e = state.engine.lock().ok()?;
+    let now = chrono::Utc::now();
+    // "Remind me at 5 to…", "remind me when Claude resets": a watch (it notifies you).
+    if let Intent::Save(t) = intent {
+        if t.to_lowercase().starts_with("remind me") {
+            if let Some(w) = e.snapshot(now).ok().and_then(|snap| aiuc_core::watch::parse(t, &snap, now)) {
+                let mut list = aiuc_core::watch::load(&e.store);
+                list.push(w.clone());
+                return Some(aiuc_core::watch::save(&e.store, &list).map(|_| match &w.condition {
+                    aiuc_core::watch::Condition::At { at } => format!("Okay, I'll remind you at {}.", at.with_timezone(&chrono::Local).format("%-I:%M %p")),
+                    _ => format!("Okay, I'll tell you {}.", lower_first(&w.label)),
+                }).map_err(|x| x.to_string()));
+            }
+        }
+    }
+    Some(match intent {
+        Intent::Remember(t) if !e.settings.ask_memory => { let _ = t; Err("Remembering is off. Switch it on in Settings → Ask.".into()) }
+        Intent::Remember(t) => memory::add(&e.store, t, now).map(|p| format!("Got it. I'll remember: {}", p.text)).map_err(|x| x.to_string()),
+        Intent::Forget(t) if ["everything", "everything about me", "all of it", "all that"].contains(&t.trim()) => {
+            memory::clear(&e.store).map(|_| "Done. I've forgotten everything you told me.".to_owned()).map_err(|x| x.to_string())
+        }
+        Intent::Forget(t) => match memory::forget_matching(&e.store, t) {
+            Ok(0) => Ok("I didn't have anything saved about that.".into()),
+            Ok(1) => Ok("Forgotten.".into()),
+            Ok(n) => Ok(format!("Forgot {n} things.")),
+            Err(x) => Err(x.to_string()),
+        },
+        Intent::Save(t) => {
+            let (text, source) = if !t.trim().is_empty() { (t.clone(), inbox::Source::Voice) }
+                else if let Some(s) = c.selection.clone().filter(|s| !s.trim().is_empty()) { (s, inbox::Source::Selection) }
+                else if let Some(s) = c.clipboard.clone().filter(|s| !s.trim().is_empty()) { (s, inbox::Source::Clipboard) }
+                else if let Some(v) = crate::buddy::last_answer() { (v.answer, inbox::Source::Ask) }
+                else { return Some(Err("Select some text first, or say what to save: \"save this: call Sam at 5\".".into())) };
+            let app = Some(c.origin.app.clone()).filter(|a| !a.is_empty());
+            inbox::capture(&e.store, &text, source, app.as_deref(), now).map(|i| match i.remind_at {
+                Some(at) => format!("Saved. I'll remind you {}.", at.with_timezone(&chrono::Local).format("at %-I:%M %p on %a")),
+                None => "Saved to your inbox.".into(),
+            }).map_err(|x| x.to_string())
+        }
+        _ => return None,
+    })
+}
+
+fn lower_first(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|h| h.to_lowercase().chain(c).collect()).unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn memory_list(state: State<AppState>) -> CmdResult<Vec<memory::Pref>> {
+    Ok(memory::list(&state.engine.lock().map_err(err)?.store))
+}
+
+#[tauri::command]
+pub fn memory_add(state: State<AppState>, text: String) -> CmdResult<memory::Pref> {
+    memory::add(&state.engine.lock().map_err(err)?.store, &text, chrono::Utc::now()).map_err(err)
+}
+
+#[tauri::command]
+pub fn memory_remove(state: State<AppState>, id: i64) -> CmdResult<()> {
+    memory::remove(&state.engine.lock().map_err(err)?.store, id).map_err(err)
+}
+
+#[tauri::command]
+pub fn memory_clear(state: State<AppState>) -> CmdResult<()> {
+    memory::clear(&state.engine.lock().map_err(err)?.store).map_err(err)
 }
 
 fn current_repo(state: &AppState) -> Option<String> {
@@ -184,7 +264,7 @@ fn failures(state: &AppState) -> Vec<(i64, String)> {
         .filter_map(|a| crate::agents::verify_output(a.id).map(|o| (a.id, o))).collect()).unwrap_or_default()
 }
 
-fn context_for(c: &Captured, repo: Option<String>) -> Context {
+fn context_for(c: &Captured, repo: Option<String>, about_me: Option<String>) -> Context {
     let mut files = vec![];
     if let Some(i) = &c.clipboard_image { files.push(i.clone()); }
     Context {
@@ -195,6 +275,7 @@ fn context_for(c: &Captured, repo: Option<String>) -> Context {
         screenshot_size: c.shot.map(|s| (s.img_width, s.img_height)),
         files,
         repo,
+        about_me,
     }
 }
 
@@ -256,13 +337,21 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
 #[tauri::command]
 pub fn ask_start(app: AppHandle, state: State<AppState>, req: AskRequest) -> CmdResult<()> {
     let c = captured().lock().map_err(err)?.clone();
+    // "Remember that I use TypeScript", "save this": no AI needed.
+    if req.history.is_empty() {
+        if let Some(r) = handle_note(&state, &ask::voice_intent(&req.question, false), &c) {
+            let (text, error) = match r { Ok(t) => (t, None), Err(e) => (String::new(), Some(e)) };
+            let _ = app.emit("ask-done", Done { id: req.id, text, error, reason: "noted".into(), ..Default::default() });
+            return Ok(());
+        }
+    }
     let rooms = rooms(&state);
     let repo = current_repo(&state);
     let work = (ask::about_work(&req.question) || req.question.trim().is_empty() && c.selection.is_none() && c.screenshot.is_none()).then(|| {
         state.last.lock().ok().and_then(|l| l.clone()).map(|s| ask::work_brief(&s, &failures(&state), chrono::Utc::now()))
     }).flatten();
     let action = if req.action == Action::Ask && c.screenshot.is_some() && ask::wants_pointing(&req.question) { Action::Point } else { req.action };
-    let ctx = context_for(&c, repo);
+    let ctx = context_for(&c, repo, about_me(&state));
     let prompt = ask::build_prompt(&req.question, action, &ctx, &req.history, work.as_deref());
     let image = c.screenshot.clone().or(c.clipboard_image.clone());
     let shot = c.shot;
@@ -285,6 +374,7 @@ pub fn ask_start(app: AppHandle, state: State<AppState>, req: AskRequest) -> Cmd
         let (answer, error, pick, reason) = (a.text, a.error, a.pick, a.reason);
         let (points, text) = if action == Action::Point { ask::parse_points(&answer) } else { (vec![], answer.trim().to_owned()) };
         if !points.is_empty() { if let Some(s) = shot { crate::buddy::point(&app, s, &points, &text); } }
+        if error.is_none() && !text.is_empty() { crate::buddy::set_last_answer(&req.question, &text, pick.tool, &reason); }
         let _ = app.emit("ask-done", Done { id: req.id.clone(), tool: Some(pick.tool), reason, error, points, text, opened_web: false });
     });
     Ok(())

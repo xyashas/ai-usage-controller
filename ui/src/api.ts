@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, CiRun, Suggestion, Watch } from "./types";
+import type { Pref, BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, CiRun, Suggestion, Watch } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -33,6 +33,10 @@ export const api = {
   buddyHide: () => call<void>("buddy_hide"),
   lastVoiceTurn: () => call<VoiceTurn | null>("last_voice_turn"),
   askHidePoints: () => call<void>("ask_hide_points"),
+  memoryList: () => call<Pref[]>("memory_list"),
+  memoryAdd: (text: string) => call<Pref>("memory_add", { text }),
+  memoryRemove: (id: number) => call<void>("memory_remove", { id }),
+  memoryClear: () => call<void>("memory_clear"),
   answerApproval: (id: string, answer: ApprovalAnswer) => call<void>("answer_approval", { id, answer }),
   verifyTask: (id: number) => call<void>("verify_task", { id }),
   verifyOutput: (id: number) => call<string | null>("verify_output", { id }),
@@ -173,6 +177,7 @@ let mockSettings: Settings = {
   verify_done: true,
   show_daily_recap: true,
   ask_screenshots: true,
+  ask_memory: true,
   polish_auto: false,
   suggest_chips: true,
   autopilot: true,
@@ -322,6 +327,11 @@ const mockAnswers: Record<string, string> = {
   work: "- **Codex** is fixing the checkout test (6 min, working).\n- **Claude** finished the coupon API docs. Tests pass.\n- **Claude** is waiting for your OK to run a migration in acme-api.\n\nClaude has **34%** left and resets at **4:12 PM**, so start the big refactor on **Codex** (24% used).",
   rewrite: "Thanks for the quick turnaround. I've reviewed the changes and they look good. Could you add a test for the empty-cart case before we merge?",
 };
+let mockPrefs: Pref[] = [
+  { id: 1, text: "I mostly write TypeScript and React.", at: "2026-11-20T10:00:00Z" },
+  { id: 2, text: "Keep answers short and casual.", at: "2026-11-24T10:00:00Z" },
+];
+
 function mockAnswer(req: AskRequest) {
   const key = req.action === "fix" || /fix|error|wrong/i.test(req.question) ? "fix" : req.action === "rewrite" || req.action === "professional" || req.action === "shorter" ? "rewrite" : "work";
   const run = (id: string, tool: Tool, text: string, reason: string, after = 0) => {
@@ -388,6 +398,10 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       return { ...base, mode: "answer", said: "what's the capital of Australia", text: "Canberra. Sydney is bigger, but Canberra has been the capital since 1913." };
     }
     case "last_voice_turn": return null;
+    case "memory_list": return mockPrefs;
+    case "memory_add": { const p = { id: Date.now(), text: String(args!.text).replace(/^./, (c) => c.toUpperCase()).replace(/\.?$/, "."), at: new Date().toISOString() }; mockPrefs.push(p); return p; }
+    case "memory_remove": mockPrefs = mockPrefs.filter((p) => p.id !== args!.id); return null;
+    case "memory_clear": mockPrefs = []; return null;
     case "ask_run": return "Typed into a new terminal. Check it, then press Enter.";
     case "ask_open_in": return "Sent to Claude Code in the Claude app";
     case "answer_approval": dismissed.add(`approval:${args!.id}`); return null;

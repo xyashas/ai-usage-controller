@@ -85,6 +85,9 @@ pub struct Settings {
     pub show_daily_recap: bool,
     /// Ask the notch: include a screenshot of the window you're in.
     pub ask_screenshots: bool,
+    /// Ask remembers preferences you tell it ("I use TypeScript") and adds them
+    /// to every question. Stored only on this computer.
+    pub ask_memory: bool,
     /// Polish tasks automatically before sending.
     pub polish_auto: bool,
     /// Show proactive suggestion chips sliding down from the notch.
@@ -119,6 +122,7 @@ impl Default for Settings {
             approvals: true,
             verify_done: true,
             ask_screenshots: true,
+            ask_memory: true,
             show_daily_recap: true,
             polish_auto: false,
             suggest_chips: true,

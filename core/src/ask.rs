@@ -84,6 +84,8 @@ pub struct Context {
     pub files: Vec<PathBuf>,
     /// The repo you're working in, if known.
     pub repo: Option<String>,
+    /// Things you asked Ask to remember about you (memory.rs), one per line.
+    pub about_me: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -163,6 +165,11 @@ pub fn build_prompt(question: &str, action: Action, ctx: &Context, history: &[Tu
     }
     if action == Action::Point {
         p.push_str(&point_instructions(ctx.screenshot_size));
+    }
+    if let Some(m) = &ctx.about_me {
+        p.push_str("\n<about_me>\nThings the user asked you to remember about them. Follow them unless this request says otherwise:\n");
+        p.push_str(&clip(m, 4000));
+        p.push_str("</about_me>\n");
     }
     if let Some(w) = work {
         p.push_str("\n<my_ai_work>\nFacts about the user's AI coding tools, tracked by the app (use them when relevant; times are local):\n");
@@ -522,4 +529,158 @@ pub fn parse_guide(answer: &str) -> GuideStep {
     }
     let say = t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ' ').to_owned();
     GuideStep { done: false, say, point: points.into_iter().next() }
+}
+
+// ---------- voice commands ----------
+
+/// What a spoken sentence means. Commands about "that"/"it" act on the last
+/// answer; everything else is a question.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Intent {
+    /// "paste that", "type it in", "paste the code"
+    Paste { code_only: bool },
+    /// "copy that"
+    Copy,
+    /// "make it shorter", "more casual", "translate it to Spanish", "in bullets"
+    Redo(String),
+    /// "send it to Codex", "open that in Claude"
+    Send(crate::model::Tool),
+    /// "say that again", "repeat that"
+    Repeat,
+    /// "stop", "never mind", "cancel"
+    Stop,
+    /// "remember that I use TypeScript", "always answer in bullets"
+    Remember(String),
+    /// "forget that I use Vim", "forget everything about me"
+    Forget(String),
+    /// "save this", "remember this", "remind me at 5 to call Sam".
+    /// Empty text means "save what I selected".
+    Save(String),
+    /// Anything else.
+    Ask,
+}
+
+fn words(s: &str) -> String {
+    s.to_lowercase().chars().map(|c| if c.is_alphanumeric() || c == '\'' || c == ' ' { c } else { ' ' }).collect::<String>()
+        .split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Strip a leading "hey", "okay", "please", "can you".
+fn bare(l: &str) -> &str {
+    let mut t = l;
+    loop {
+        let before = t;
+        for lead in ["hey ", "ok ", "okay ", "um ", "uh ", "so ", "please ", "can you ", "could you ", "now "] {
+            if let Some(r) = t.strip_prefix(lead) { t = r; }
+        }
+        if t == before { return t.trim_end_matches(" please"); }
+    }
+}
+
+/// Work out what a spoken sentence asks for. `has_last` says whether there's
+/// a recent answer for "that" to point at; without one, commands about it are
+/// just questions.
+pub fn voice_intent(said: &str, has_last: bool) -> Intent {
+    use crate::model::Tool;
+    let raw = said.trim();
+    let l = words(raw);
+    let b = bare(&l);
+    let it = |rest: &str| ["that", "it", "this", "the answer", "that answer", "the code", "that code", "this code"].iter().any(|w| rest == *w || rest.starts_with(&format!("{w} ")));
+
+    if ["stop", "never mind", "nevermind", "cancel", "shut up", "be quiet", "stop talking", "that's all", "thanks that's all"].contains(&b) {
+        return Intent::Stop;
+    }
+
+    // Saving and reminders (the inbox) — before preferences, as both start with "remember".
+    for lead in ["remind me ", "remember this", "save this", "save that", "note this", "note that down", "add this to my inbox", "add that to my inbox", "add to my inbox", "jot down", "make a note"] {
+        if b.starts_with(lead) {
+            let tail = raw_after(raw, lead.trim());
+            if lead == "remind me " { return Intent::Save(format!("Remind me {tail}")); }
+            let tail = tail.trim_start_matches(|c: char| c == ':' || c == ',' || c == '-' || c.is_whitespace());
+            let tail = ["for later", "to my inbox", "down", "that", "to"].iter().fold(tail, |t, w| t.strip_prefix(w).map(str::trim_start).unwrap_or(t));
+            let tail = tail.trim_start_matches([':', ',']).trim();
+            return Intent::Save(tail.to_owned());
+        }
+    }
+
+    // Preferences.
+    if let Some(rest) = b.strip_prefix("forget ") {
+        let rest = rest.trim_start_matches("that ").trim_start_matches("about ");
+        return Intent::Forget(rest.to_owned());
+    }
+    for lead in ["remember that ", "remember i ", "remember my ", "remember to always ", "remember to never ", "from now on ", "always ", "never "] {
+        if b.starts_with(lead) && b.len() > lead.len() + 2 {
+            // "always" / "never" only as instructions ("always answer in bullets"), not questions.
+            if (lead == "always " || lead == "never ") && b.ends_with('?') { break; }
+            let keep = if lead.starts_with("remember that") || lead == "from now on " { &b[lead.len()..] } else if lead.starts_with("remember to ") { &b["remember to ".len()..] } else if lead.starts_with("remember ") { &b["remember ".len()..] } else { b };
+            return Intent::Remember(cased(raw, keep));
+        }
+    }
+    for lead in ["i prefer ", "i like my answers ", "i'd like answers ", "call me "] {
+        if b.starts_with(lead) { return Intent::Remember(cased(raw, b)); }
+    }
+
+    if !has_last { return Intent::Ask; }
+
+    // About the last answer.
+    for lead in ["paste ", "type ", "put ", "insert ", "drop "] {
+        if let Some(rest) = b.strip_prefix(lead) {
+            let rest = rest.trim_end_matches(" in").trim_end_matches(" here").trim_end_matches(" there");
+            if it(rest) || rest == "in" { return Intent::Paste { code_only: rest.contains("code") }; }
+        }
+    }
+    if b == "paste" { return Intent::Paste { code_only: false }; }
+    if let Some(rest) = b.strip_prefix("copy ") { if it(rest) { return Intent::Copy; } }
+    if ["say that again", "say it again", "repeat that", "repeat", "again", "what did you say", "read that again", "read it again"].contains(&b) {
+        return Intent::Repeat;
+    }
+    for lead in ["send ", "open ", "give ", "hand ", "pass "] {
+        if let Some(rest) = b.strip_prefix(lead) {
+            let r = rest.split_once(" to ").or_else(|| rest.split_once(" in ")).or_else(|| rest.split_once(" with ")).map(|(a, t)| (a.trim(), t.trim()));
+            if let Some((what, to)) = r {
+                if it(what) || what.is_empty() {
+                    let tool = if to.contains("codex") || to.contains("chatgpt") { Some(Tool::Codex) } else if to.contains("claude") { Some(Tool::ClaudeCode) } else if to.contains("gemini") { Some(Tool::Gemini) } else { None };
+                    if let Some(t) = tool { return Intent::Send(t); }
+                }
+            }
+        }
+    }
+    // Rewrites: "make it shorter", "shorter", "more casual", "translate it to French".
+    let redo = |s: &str| Intent::Redo(s.to_owned());
+    if let Some(rest) = b.strip_prefix("make it ").or_else(|| b.strip_prefix("make that ")) { return redo(rest); }
+    if let Some(rest) = b.strip_prefix("translate ") {
+        let rest = rest.trim_start_matches("it ").trim_start_matches("that ").trim_start_matches("this ");
+        return redo(&format!("translate it {rest}"));
+    }
+    if let Some(rest) = b.strip_prefix("rewrite it ").or_else(|| b.strip_prefix("rewrite that ")).or_else(|| b.strip_prefix("say it ")).or_else(|| b.strip_prefix("say that ")) { return redo(rest); }
+    let short = ["shorter", "longer", "simpler", "more casual", "more formal", "more professional", "friendlier", "more detail", "less formal",
+        "in bullets", "in bullet points", "as bullets", "as a list", "explain it simpler", "explain like i'm five", "eli5", "fix the grammar", "even shorter", "in one sentence"];
+    if short.iter().any(|s| b == *s || b.starts_with(&format!("{s} "))) { return redo(b); }
+    if b.starts_with("more ") && b.split(' ').count() <= 3 { return redo(b); }
+    if b.starts_with("in ") && b.split(' ').count() <= 3 && b.chars().next().is_some() { return redo(&format!("translate it {b}")); }
+    Intent::Ask
+}
+
+/// `piece` (lowercased) as the user wrote it, if it appears as is.
+fn cased(raw: &str, piece: &str) -> String {
+    let lower = raw.to_lowercase();
+    match lower.find(piece) {
+        Some(i) if lower.len() == raw.len() && raw.is_char_boundary(i + piece.len()) => raw[i..i + piece.len()].to_owned(),
+        _ => piece.to_owned(),
+    }
+}
+
+/// The original sentence after `marker` (keeps the user's casing).
+fn raw_after(raw: &str, marker: &str) -> String {
+    let lower = raw.to_lowercase();
+    match lower.find(marker) {
+        // Lowercasing can change byte lengths for some scripts; fall back safely.
+        Some(i) if raw.is_char_boundary(i + marker.len()) => raw[i + marker.len()..].trim().trim_end_matches(['.', '!']).to_owned(),
+        _ => String::new(),
+    }
+}
+
+/// The prompt that redoes the last answer the way you asked.
+pub fn redo_question(instruction: &str) -> String {
+    format!("Redo your last answer: {instruction}. Reply with only the new version, no preamble.")
 }

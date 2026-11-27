@@ -1,6 +1,6 @@
 import { ToolMark } from "./ToolMark";
 import { useEffect, useState } from "react";
-import type { Plan, Settings, Snapshot, Tool } from "../types";
+import type { Plan, Pref, Settings, Snapshot, Tool } from "../types";
 import { api } from "../api";
 import { BackIcon } from "./icons";
 
@@ -78,6 +78,8 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
       <Section title="Ask">
         <Toggle label="Include a screenshot of the window you're in" on={s.ask_screenshots} set={(v) => update({ ...s, ask_screenshots: v })} />
         <HistoryToggle />
+        <Toggle label="Remember things I tell it about me" on={s.ask_memory} set={(v) => update({ ...s, ask_memory: v })} />
+        {s.ask_memory && <Memory />}
         <p className="text-[11px] leading-relaxed text-muted">
           Press {navigator.userAgent.includes("Mac") ? "⌥⇧Space" : "Alt+Shift+Space"} anywhere. Answers come from Claude Code, Codex or Gemini on your own plan, whichever has room. Screenshots go only to that AI and are deleted after.
           {navigator.userAgent.includes("Mac") ? " Needs Screen Recording and Accessibility permission for AI Usage Controller." : ""}
@@ -202,6 +204,47 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span>{label}</span>
       {children}
     </label>
+  );
+}
+
+/** What Ask remembers: see it, add to it, delete any of it. */
+function Memory() {
+  const [prefs, setPrefs] = useState<Pref[]>([]);
+  const [draft, setDraft] = useState("");
+  const load = () => api.memoryList().then(setPrefs, () => {});
+  useEffect(() => { load(); }, []);
+  const add = async () => {
+    if (!draft.trim()) return;
+    await api.memoryAdd(draft.trim()).catch(() => {});
+    setDraft("");
+    load();
+  };
+  return (
+    <div className="rounded-[12px] bg-white/[0.04] p-2.5">
+      <p className="mb-2 text-[11px] text-muted">Added to every question. Say “remember that…” or “forget…”, or edit here.</p>
+      {prefs.length > 0 && (
+        <ul className="mb-2 space-y-1">
+          {prefs.map((p) => (
+            <li key={p.id} className="group fade-in flex items-start gap-2 rounded-[8px] px-1.5 py-1 text-[12px] hover:bg-white/[0.05]">
+              <span className="mt-[6px] h-1 w-1 shrink-0 rounded-full bg-[#fbbf24]" />
+              <span className="min-w-0 flex-1 leading-snug">{p.text}</span>
+              <button aria-label="Forget this" onClick={() => api.memoryRemove(p.id).then(load)} className="shrink-0 text-[13px] leading-none text-muted opacity-0 transition-opacity hover:text-fg group-hover:opacity-100 focus:opacity-100">×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-1.5">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          placeholder="e.g. I use Python 3.12"
+          className="min-w-0 flex-1 rounded-[8px] bg-white/[0.06] px-2 py-1 text-[12px] outline-none placeholder:text-muted focus:bg-white/[0.09]"
+        />
+        <button onClick={add} disabled={!draft.trim()} className="btn px-2.5 py-1 text-[12px] disabled:opacity-40">Add</button>
+      </div>
+      {prefs.length > 1 && <button onClick={() => api.memoryClear().then(load)} className="mt-2 text-[11px] text-muted hover:text-fg">Forget everything</button>}
+    </div>
   );
 }
 

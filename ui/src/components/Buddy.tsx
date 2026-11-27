@@ -39,6 +39,21 @@ function chime(up: boolean) {
   } catch { /* no audio */ }
 }
 
+/** One rotating tip under an answer, so voice commands are easy to find. */
+const TIPS = [
+  "Hold again and say “paste that”",
+  "Say “shorter” or “more casual” to redo it",
+  "Say “send it to Codex” to hand it off",
+  "Say “remember that I…” and I'll keep it in mind",
+  "Say “save this” to put it in your inbox",
+  `Tap ${KEY} to keep going in the panel`,
+];
+let tipAt = Math.floor(Math.random() * TIPS.length);
+function Tip() {
+  const [t] = useState(() => TIPS[tipAt++ % TIPS.length]);
+  return <>{t}</>;
+}
+
 const clean = (t: string) => t.replace(/\*\*|`|#+ /g, "").replace(/<point[^>]*\/>/g, "").trim();
 
 /** The see-through window over your screen: live captions while you talk,
@@ -84,7 +99,8 @@ export function Buddy() {
         setFrom(prev?.spots[0] ? [prev.spots[0].fx, prev.spots[0].fy] : s.cursor);
         return s;
       });
-      const linger = s.mode === "error" ? 9000 : s.mode === "done" ? 6000 : s.mode === "guide" ? 120000 : 0;
+      // Quick confirmations ("Pasted", "Saved") leave fast; real answers stay a while.
+      const linger = s.mode === "error" ? 9000 : s.mode === "done" ? (s.text.length < 60 ? 2200 : 6000) : s.mode === "guide" ? 120000 : 0;
       if (s.speak) say(clean(s.speak), () => { if (s.mode === "answer" || s.mode === "done") fade.current = window.setTimeout(hide, 8000); });
       else if (linger) fade.current = window.setTimeout(hide, linger);
     };
@@ -164,7 +180,7 @@ export function Buddy() {
               </p>
               {(b.mode === "guide" || b.mode === "answer") && (
                 <p className="mt-2 text-[10.5px] text-white/35">
-                  {b.mode === "guide" ? `Click it and I'll show the next step · tap ${KEY} to stop` : `Tap ${KEY} to keep going in the panel`}
+                  {b.mode === "guide" ? `Click it and I'll show the next step · tap ${KEY} to stop` : <Tip />}
                 </p>
               )}
             </div>

@@ -178,35 +178,123 @@ pub fn on_release(app: &AppHandle) {
 pub struct VoiceTurn { pub question: String, pub answer: String, pub tool: Option<aiuc_core::model::Tool>, pub reason: String }
 
 static LAST_VOICE: Mutex<Option<(VoiceTurn, Instant)>> = Mutex::new(None);
+/// The last answer from voice or the panel: what "paste that" means.
+static LAST_ANY: Mutex<Option<(VoiceTurn, Instant)>> = Mutex::new(None);
+/// "That" stops meaning the last answer after this long.
+const THAT_FOR: Duration = Duration::from_secs(10 * 60);
 
 #[tauri::command]
 pub fn last_voice_turn() -> Option<VoiceTurn> {
     LAST_VOICE.lock().ok()?.as_ref().filter(|(_, at)| at.elapsed() < Duration::from_secs(180)).map(|(t, _)| t.clone())
 }
 
-fn voice_ask(app: &AppHandle, said: String) {
-    let state = app.state::<AppState>();
-    let shots = state.engine.lock().map(|e| e.settings.ask_screenshots).unwrap_or(true);
-    capture::clean_temp();
-    let c = capture::capture(shots);
-    app_ask::set_captured(c.clone());
-    if ask::wants_guide(&said) && c.screenshot.is_some() {
-        guide(app, said);
-        return;
+pub fn last_answer() -> Option<VoiceTurn> {
+    LAST_ANY.lock().ok()?.as_ref().filter(|(_, at)| at.elapsed() < THAT_FOR).map(|(t, _)| t.clone())
+}
+
+pub fn set_last_answer(question: &str, answer: &str, tool: aiuc_core::model::Tool, reason: &str) {
+    if let Ok(mut l) = LAST_ANY.lock() {
+        *l = Some((VoiceTurn { question: question.to_owned(), answer: answer.to_owned(), tool: Some(tool), reason: reason.to_owned() }, Instant::now()));
     }
+}
+
+/// Markdown → text that reads well when pasted into any app.
+fn plain(md: &str) -> String {
+    md.lines()
+        .filter(|l| !l.trim_start().starts_with("```"))
+        .map(|l| l.trim_start_matches('#').trim_start().replace("**", "").replace('`', ""))
+        .collect::<Vec<_>>().join("\n").trim().to_owned()
+}
+
+/// A short confirmation by the cursor ("Pasted", "Saved to your inbox").
+fn confirm(app: &AppHandle, said: String, text: impl Into<String>, speak: bool) {
+    let text = text.into();
+    show(app, Buddy { mode: "done".into(), said, speak: if speak { text.clone() } else { String::new() }, text, ..Default::default() });
+}
+
+fn fail(app: &AppHandle, said: String, text: impl Into<String>) {
+    show(app, Buddy { mode: "error".into(), said, text: text.into(), ..Default::default() });
+}
+
+fn voice_ask(app: &AppHandle, said: String) {
+    use ask::Intent;
+    let state = app.state::<AppState>();
+    let last = last_answer();
+    let intent = ask::voice_intent(&said, last.is_some());
+    match (&intent, last) {
+        (Intent::Stop, _) => { GUIDING.store(false, Ordering::SeqCst); hide(app); }
+        (Intent::Paste { code_only }, Some(l)) => {
+            let text = if *code_only { ask::first_code_block(&l.answer).unwrap_or_else(|| plain(&l.answer)) } else { plain(&l.answer) };
+            // Where you are now (the buddy never takes focus).
+            let origin = capture::capture(false).origin;
+            hide(app);
+            match capture::paste_back(&origin, &text) {
+                Ok(()) => confirm(app, said, "Pasted", false),
+                Err(e) => fail(app, said, e),
+            }
+        }
+        (Intent::Copy, Some(l)) => match capture::copy_text(&plain(&l.answer)) {
+            Ok(()) => confirm(app, said, "Copied", false),
+            Err(e) => fail(app, said, e),
+        },
+        (Intent::Repeat, Some(l)) => {
+            show(app, Buddy { mode: "answer".into(), said, speak: l.answer.clone(), text: l.answer, id: format!("voice-{}", chrono::Utc::now().timestamp_millis()), ..Default::default() });
+        }
+        (Intent::Send(tool), Some(l)) => {
+            let text = format!("{}\n\n{}", l.question, l.answer);
+            let dest = crate::handoff::destinations(*tool, false).first().map(|d| d.dest).unwrap_or(crate::handoff::Dest::Web);
+            match crate::handoff::start_task(None, *tool, dest, text.trim(), true) {
+                Ok((m, _)) => confirm(app, said, m, false),
+                Err(e) => fail(app, said, e),
+            }
+        }
+        (Intent::Redo(how), Some(l)) => {
+            let history = [ask::Turn { question: l.question.clone(), answer: l.answer.clone() }];
+            app_ask::set_captured(Default::default());
+            speak_answer(app, said, &ask::redo_question(how), &history, &l.question);
+        }
+        (Intent::Remember(_) | Intent::Forget(_) | Intent::Save(_), _) => {
+            let c = capture::capture(false);
+            match app_ask::handle_note(&state, &intent, &c) {
+                Some(Ok(msg)) => confirm(app, said, msg, false),
+                Some(Err(e)) => fail(app, said, e),
+                None => {}
+            }
+        }
+        _ => {
+            let shots = state.engine.lock().map(|e| e.settings.ask_screenshots).unwrap_or(true);
+            capture::clean_temp();
+            let c = capture::capture(shots);
+            app_ask::set_captured(c.clone());
+            if ask::wants_guide(&said) && c.screenshot.is_some() {
+                guide(app, said);
+                return;
+            }
+            let q = said.clone();
+            speak_answer(app, said, &q, &[], &q);
+        }
+    }
+}
+
+/// Ask, stream the answer into the bubble, then read it aloud.
+/// `topic` is what the turn is remembered as (the original question on a redo).
+fn speak_answer(app: &AppHandle, said: String, question: &str, history: &[ask::Turn], topic: &str) {
+    let state = app.state::<AppState>();
     let id = format!("voice-{}", chrono::Utc::now().timestamp_millis());
     show(app, Buddy { mode: "answer".into(), said: said.clone(), id: id.clone(), ..Default::default() });
-    let Some((rooms, pick, prompt, image)) = app_ask::prepare(&state, &said, Action::Ask, &[], "Answer in 1–3 short sentences that sound natural read aloud. No code blocks unless asked.") else {
-        show(app, Buddy { mode: "error".into(), said, text: "Install Claude Code, Codex or Gemini to ask by voice.".into(), ..Default::default() });
+    let Some((rooms, pick, prompt, image)) = app_ask::prepare(&state, question, Action::Ask, history, "Answer in 1–3 short sentences that sound natural read aloud. No code blocks unless asked.") else {
+        fail(app, said, "Install Claude Code, Codex or Gemini to ask by voice.");
         return;
     };
     let a = app_ask::answer(Some(app), &id, rooms, pick, Mode::Quick, &prompt, image.as_deref());
     let text = a.text.trim().to_owned();
-    if let Ok(mut l) = LAST_VOICE.lock() {
-        *l = Some((VoiceTurn { question: said.clone(), answer: text.clone(), tool: Some(a.pick.tool), reason: a.reason.clone() }, Instant::now()));
+    if !text.is_empty() {
+        let turn = VoiceTurn { question: topic.to_owned(), answer: text.clone(), tool: Some(a.pick.tool), reason: a.reason.clone() };
+        if let Ok(mut l) = LAST_VOICE.lock() { *l = Some((turn.clone(), Instant::now())); }
+        set_last_answer(topic, &text, a.pick.tool, &a.reason);
     }
     match a.error {
-        Some(e) if text.is_empty() => show(app, Buddy { mode: "error".into(), said, text: e, ..Default::default() }),
+        Some(e) if text.is_empty() => fail(app, said, e),
         _ => show(app, Buddy { mode: "answer".into(), said, speak: text.clone(), text, id, ..Default::default() }),
     }
 }
