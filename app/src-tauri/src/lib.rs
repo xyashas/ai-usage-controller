@@ -4,6 +4,7 @@ mod autopilot;
 mod autosend;
 mod buddy;
 mod ci_watch;
+mod inbox;
 mod capture;
 mod clipboard_watch;
 mod watch;
@@ -881,6 +882,12 @@ pub fn run() {
             watch::remove_watch,
             ci_watch::ci_runs,
             ci_watch::ci_log,
+            inbox::inbox_list,
+            inbox::inbox_done,
+            inbox::inbox_remove,
+            inbox::inbox_clear_done,
+            inbox::inbox_remind,
+            inbox::inbox_to_task,
             alert_action,
             accept_nudge,
             accept_audit,

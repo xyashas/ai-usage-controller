@@ -247,6 +247,17 @@ export interface CiRun {
   updated_at: string;
 }
 
+export type InboxSource = "voice" | "selection" | "clipboard" | "ask";
+export interface InboxItem {
+  id: number;
+  text: string;
+  source: InboxSource;
+  app: string | null;
+  at: string;
+  remind_at: string | null;
+  done: boolean;
+}
+
 // ---------- the on-screen buddy ----------
 export interface BuddySpot { fx: number; fy: number; label: string }
 export interface BuddyState {

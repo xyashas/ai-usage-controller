@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Pref, BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, CiRun, Suggestion, Watch } from "./types";
+import type { Pref, BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, CiRun, InboxItem, Suggestion, Watch } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -72,6 +72,12 @@ export const api = {
   removeWatch: (id: string) => call<void>("remove_watch", { id }),
   ciRuns: () => call<CiRun[]>("ci_runs"),
   ciLog: (runId: number) => call<string>("ci_log", { runId }),
+  inboxList: () => call<InboxItem[]>("inbox_list"),
+  inboxDone: (id: number, done: boolean) => call<InboxItem | null>("inbox_done", { id, done }),
+  inboxRemove: (id: number) => call<boolean>("inbox_remove", { id }),
+  inboxClearDone: () => call<number>("inbox_clear_done"),
+  inboxRemind: (id: number, whenText: string) => call<Watch>("inbox_remind", { id, whenText }),
+  inboxToTask: (id: number) => call<string>("inbox_to_task", { id }),
   alertAction: (alert: Alert) => call<string>("alert_action", { id: alert.id }),
   acceptNudge: () => call<void>("accept_nudge"),
   acceptAudit: (tool: Tool) => call<void>("accept_audit", { tool }),
@@ -133,6 +139,12 @@ export async function onSuggestion(cb: (s: Suggestion) => void): Promise<() => v
   return listen<Suggestion>("suggestion", (e) => cb(e.payload));
 }
 
+export async function onInboxChanged(cb: () => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("inbox-changed", () => cb());
+}
+
 export async function onWatchesChanged(cb: () => void): Promise<() => void> {
   if (!inTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
@@ -142,7 +154,7 @@ export async function onWatchesChanged(cb: () => void): Promise<() => void> {
 export async function onOpenView(cb: (v: string) => void): Promise<() => void> {
   if (!inTauri) {
     const preview = new URLSearchParams(location.search).get("view");
-    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding", "handoffs", "agents", "ask"].includes(preview)) cb(preview);
+    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding", "handoffs", "agents", "ask", "inbox"].includes(preview)) cb(preview);
     return () => {};
   }
   const { listen } = await import("@tauri-apps/api/event");
@@ -184,6 +196,11 @@ let mockSettings: Settings = {
   ci_watch: true,
 };
 const dismissed = new Set<string>();
+let mockInbox: InboxItem[] = mockScenario === "empty" ? [] : [
+  { id: 201, text: "Check why the checkout coupon test fails when tax is zero", source: "voice", app: "Chrome", at: inMin(-18), remind_at: null, done: false },
+  { id: 202, text: "Add rate-limit retry with backoff on the Lemon Squeezy webhook", source: "ask", app: "VS Code", at: inMin(-95), remind_at: inMin(180), done: false },
+  { id: 203, text: "Update release notes for v0.1.2", source: "selection", app: "Linear", at: inMin(-360), remind_at: null, done: true },
+];
 let mockWatches: Watch[] = [
   { id: "w-1", condition: { kind: "limit_reset", tool: "claude_code" }, label: "When Claude resets", created_at: inMin(-15) },
 ];
@@ -474,6 +491,34 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
         { tool: "gemini", label: "Gemini", folders_found: [], folders_checked: ["C:/Users/you/.gemini/tmp"], requests_total: 0, requests_today: 0, last_request_at: null, gauge_source: null, gauge_at: null, gauge_used_pct: null, live_error: null },
       ],
     };
+    case "inbox_list": return [...mockInbox];
+    case "inbox_done": {
+      const it = mockInbox.find((x) => x.id === args!.id);
+      if (it) it.done = !!args!.done;
+      return it ? { ...it } : null;
+    }
+    case "inbox_remove": {
+      const before = mockInbox.length;
+      mockInbox = mockInbox.filter((x) => x.id !== args!.id);
+      return mockInbox.length < before;
+    }
+    case "inbox_clear_done": {
+      const before = mockInbox.length;
+      mockInbox = mockInbox.filter((x) => !x.done);
+      return before - mockInbox.length;
+    }
+    case "inbox_remind": {
+      const it = mockInbox.find((x) => x.id === args!.id);
+      const at = String(args!.whenText ?? "").includes("tomorrow") ? inMin(60 * 16) : inMin(180);
+      if (it) it.remind_at = at;
+      const w: Watch = { id: `w-inbox-${Date.now()}`, condition: { kind: "at", at }, label: it?.text.slice(0, 60) ?? "Reminder", created_at: now().toISOString() };
+      mockWatches = [...mockWatches, w];
+      return w;
+    }
+    case "inbox_to_task": {
+      const it = mockInbox.find((x) => x.id === args!.id);
+      return it?.text ?? "";
+    }
     default: return null;
   }
 }
