@@ -78,7 +78,11 @@ function RepoTile({ repo, onPick, onChanged }: { repo: RepoStatus; onPick: (r: R
     <section className="tile fade-in space-y-3">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13.5px] font-semibold tracking-tight">{repo.name}</p>
+          <p className="flex items-center gap-1.5 truncate text-[13.5px] font-semibold tracking-tight">
+            {repo.github && <span className="text-muted" title="Also on GitHub, so cloud agents can work on it"><GithubMark /></span>}
+            <span className="truncate">{repo.name}</span>
+          </p>
+          <p className="truncate text-[11px] text-mute" title={repo.root}>{repo.root}</p>
           {l ? (
             <p className="mt-0.5 flex items-center gap-1 truncate text-[11.5px] text-muted">
               <BranchIcon /><span className="truncate">{l.branch || repo.current_branch}</span>
@@ -176,7 +180,7 @@ export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
       <LocalSessions offers={offers} onPick={onHandoff} />
 
       <div className="flex items-center justify-between px-1 pt-1">
-        <p className="eyebrow">Repos · local and cloud</p>
+        <p className="eyebrow">On this computer</p>
         <div className="flex items-center gap-0.5">
           <button className="icon-btn" title="Check GitHub for new handoffs" aria-label="Check GitHub for new handoffs" disabled={fetching} onClick={() => load(true)}><RefreshIcon spin={fetching} /></button>
           <button className="icon-btn" title="Add a repo" aria-label="Add a repo" onClick={add}><PlusIcon /></button>
