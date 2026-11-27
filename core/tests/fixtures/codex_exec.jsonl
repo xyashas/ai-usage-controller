@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"01972a1b-4c5d-7000-8000-000000000001"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"Checking the error message."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Update the expected date in the assertion to match UTC midnight."}}
+{"type":"turn.completed","usage":{"input_tokens":1420,"cached_input_tokens":1024,"output_tokens":28}}

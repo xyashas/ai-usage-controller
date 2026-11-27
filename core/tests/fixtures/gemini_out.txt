@@ -1,0 +1,2 @@
+The warning comes from an unused dependency in Cargo.toml.
+Remove the unused crate entry and re-run cargo clippy.
