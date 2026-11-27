@@ -349,12 +349,18 @@ pub enum Failure {
     SignedOut,
     /// Out of its limit or rate-limited.
     OutOfRoom,
+    /// The provider no longer supports this way of using it (e.g. Gemini CLI
+    /// with a personal Google login since Google moved people to Antigravity).
+    Unsupported,
     Other,
 }
 
 /// What kind of failure a CLI's error is, so another tool can step in.
 pub fn classify(error: &str) -> Failure {
     let e = error.to_lowercase();
+    if ["no longer supported", "not supported", "migrate to", "deprecated", "antigravity"].iter().any(|w| e.contains(w)) {
+        return Failure::Unsupported;
+    }
     if ["api key", "api_key", "apikey", "not logged in", "log in", "login", "sign in", "auth", "credential", "unauthorized", "401", "403"].iter().any(|w| e.contains(w)) {
         Failure::SignedOut
     } else if ["usage limit", "rate limit", "quota", "429", "limit reached", "too many requests", "exceeded"].iter().any(|w| e.contains(w)) {
@@ -371,6 +377,8 @@ pub fn explain_failure(tool: Tool, f: Failure) -> String {
         (Tool::Gemini, Failure::SignedOut) => "Gemini isn't signed in. Run `gemini` in a terminal once and choose Login with Google.".into(),
         (Tool::ClaudeCode, Failure::SignedOut) => "Claude Code isn't signed in. Run `claude` in a terminal once and log in.".into(),
         (Tool::Codex, Failure::SignedOut) => "Codex isn't signed in. Run `codex` in a terminal once and sign in with ChatGPT.".into(),
+        (Tool::Gemini, Failure::Unsupported) => "Google no longer lets the Gemini CLI use a personal Google login, so Gemini is skipped. To use it, set a free Gemini API key from aistudio.google.com as GEMINI_API_KEY.".into(),
+        (_, Failure::Unsupported) => format!("{name} no longer works this way, so it's skipped."),
         (_, Failure::OutOfRoom) => format!("{name} is out of room right now."),
         (_, Failure::Other) => format!("{name} couldn't answer."),
     }

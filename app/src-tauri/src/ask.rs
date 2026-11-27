@@ -63,18 +63,19 @@ fn current_repo(state: &AppState) -> Option<String> {
 }
 
 /// Tools that just failed for a reason that won't fix itself in seconds (not
-/// signed in, out of room): skipped for 10 minutes.
+/// signed in, out of room: 10 minutes; no longer supported: a day), by when
+/// they can be tried again.
 fn broken() -> &'static Mutex<HashMap<Tool, std::time::Instant>> {
     static B: OnceLock<Mutex<HashMap<Tool, std::time::Instant>>> = OnceLock::new();
     B.get_or_init(Default::default)
 }
 
-fn mark_broken(tool: Tool) {
-    if let Ok(mut b) = broken().lock() { b.insert(tool, std::time::Instant::now()); }
+fn mark_broken_for(tool: Tool, secs: u64) {
+    if let Ok(mut b) = broken().lock() { b.insert(tool, std::time::Instant::now() + std::time::Duration::from_secs(secs)); }
 }
 
 fn is_broken(tool: Tool) -> bool {
-    broken().lock().ok().and_then(|b| b.get(&tool).copied()).is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(600))
+    broken().lock().ok().and_then(|b| b.get(&tool).copied()).is_some_and(|until| std::time::Instant::now() < until)
 }
 
 fn rooms(state: &AppState) -> Vec<Room> {
@@ -264,13 +265,18 @@ pub fn ask_start(app: AppHandle, state: State<AppState>, req: AskRequest) -> Cmd
             let (answer, error) = run_one(&app, &req.id, pick.tool, req.mode, &prompt, image.as_deref());
             let Some(e) = error.as_deref() else { break (answer, error) };
             if !answer.trim().is_empty() || e == "Stopped." { break (answer, error); }
+            // Any failure: the next tool with room tries. Lasting ones are remembered.
             let failure = ask::classify(e);
-            if failure != ask::Failure::Other { mark_broken(pick.tool); }
-            skipped.push(ask::explain_failure(pick.tool, failure));
+            match failure {
+                ask::Failure::Unsupported => mark_broken_for(pick.tool, 24 * 3600),
+                ask::Failure::Other => {}
+                _ => mark_broken_for(pick.tool, 600),
+            }
+            skipped.push(if failure == ask::Failure::Other { format!("{} failed ({}).", crate::tool_name(pick.tool), e.trim_start_matches(&format!("{}: ", crate::tool_name(pick.tool))).chars().take(120).collect::<String>()) } else { ask::explain_failure(pick.tool, failure) });
             if let Some(r) = rooms.iter_mut().find(|r| r.tool == pick.tool) { r.installed = false; }
             match ask::pick(&rooms, None) {
                 Some(next) => pick = next,
-                None => break (answer, Some(if failure == ask::Failure::Other { e.to_owned() } else { skipped.join(" ") })),
+                None => break (answer, Some(skipped.join(" "))),
             }
         };
         let reason = if skipped.is_empty() { pick.reason.clone() } else { skipped.join(" ") };
@@ -289,6 +295,10 @@ fn council(app: &AppHandle, req: &AskRequest, rooms: &[Room], prompt: &str, imag
         let (app, answers, id, prompt, image, mode) = (app.clone(), answers.clone(), format!("{}:{}", req.id, t.as_str()), prompt.to_owned(), image.map(|p| p.to_path_buf()), req.mode);
         std::thread::spawn(move || {
             let (a, e) = run_one(&app, &id, t, mode, &prompt, image.as_deref());
+            let e = e.map(|e| match ask::classify(&e) {
+                ask::Failure::Other => e,
+                f => { mark_broken_for(t, if f == ask::Failure::Unsupported { 24 * 3600 } else { 600 }); ask::explain_failure(t, f) }
+            });
             let _ = app.emit("ask-done", Done { id, tool: Some(t), reason: String::new(), error: e.clone(), text: a.trim().to_owned(), ..Default::default() });
             if e.is_none() && !a.trim().is_empty() { if let Ok(mut v) = answers.lock() { v.push((t, a)); } }
         })
@@ -417,11 +427,29 @@ pub async fn polish_prompt(state: State<'_, AppState>, text: String, repo: Optio
         .filter(|a| a.verify.as_deref() == Some("failed"))
         .filter(|a| root.as_ref().is_none_or(|r| std::path::Path::new(&a.cwd).starts_with(r) || a.cwd.contains(&*r.file_name().map(|n| n.to_string_lossy()).unwrap_or_default())))
         .find_map(|a| crate::agents::verify_output(a.id)));
-    let pick = ask::pick(&rooms(&state), None).ok_or("Polishing needs Claude Code, Codex or Gemini installed.")?;
+    let mut rooms = rooms(&state);
+    if ask::pick(&rooms, None).is_none() { return Err("Polishing needs Claude Code, Codex or Gemini installed.".into()); }
     tauri::async_runtime::spawn_blocking(move || {
         let ctx = aiuc_core::polish::gather(root.as_deref(), failure.as_deref());
-        let (out, e) = run_cli(None, &format!("polish{}", chrono::Utc::now().timestamp_millis()), pick.tool, Mode::Quick, &aiuc_core::polish::request(&text, &ctx), None);
-        if let Some(e) = e { return Err(e); }
-        Ok(aiuc_core::polish::clean(&out))
+        let request = aiuc_core::polish::request(&text, &ctx);
+        let mut last = String::new();
+        // Like Ask: if one tool can't answer, the next one with room does.
+        while let Some(pick) = ask::pick(&rooms, None) {
+            let (out, e) = run_cli(None, &format!("polish{}", chrono::Utc::now().timestamp_millis()), pick.tool, Mode::Quick, &request, None);
+            match e {
+                None if !out.trim().is_empty() => return Ok(aiuc_core::polish::clean(&out)),
+                e => {
+                    let e = e.unwrap_or_default();
+                    match ask::classify(&e) {
+                        ask::Failure::Unsupported => mark_broken_for(pick.tool, 24 * 3600),
+                        ask::Failure::Other => {}
+                        _ => mark_broken_for(pick.tool, 600),
+                    }
+                    last = e;
+                    if let Some(r) = rooms.iter_mut().find(|r| r.tool == pick.tool) { r.installed = false; }
+                }
+            }
+        }
+        Err(if last.is_empty() { "No tool could polish this right now.".into() } else { last })
     }).await.map_err(err)?
 }

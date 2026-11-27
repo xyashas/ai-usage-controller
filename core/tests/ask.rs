@@ -107,5 +107,7 @@ fn failures_are_classified_so_another_tool_can_answer() {
     assert_eq!(ask::classify("Claude AI usage limit reached|1700000000"), Failure::OutOfRoom);
     assert_eq!(ask::classify("429 Too Many Requests"), Failure::OutOfRoom);
     assert_eq!(ask::classify("segfault"), Failure::Other);
+    assert_eq!(ask::classify("Gemini: An unexpected critical error occurred: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google"), Failure::Unsupported);
+    assert!(ask::explain_failure(Tool::Gemini, Failure::Unsupported).contains("GEMINI_API_KEY"));
     assert!(ask::explain_failure(Tool::Gemini, Failure::SignedOut).contains("Login with Google"));
 }
