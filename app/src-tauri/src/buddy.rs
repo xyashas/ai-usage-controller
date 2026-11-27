@@ -25,7 +25,7 @@ pub struct Spot { pub fx: f64, pub fy: f64, pub label: String }
 /// What the buddy window shows.
 #[derive(Serialize, Clone, Default)]
 pub struct Buddy {
-    /// "listening" | "thinking" | "answer" | "guide" | "done" | "error" | "hide"
+    /// "starting" | "listening" | "thinking" | "answer" | "guide" | "done" | "error" | "hide"
     pub mode: String,
     /// What you said.
     pub said: String,
@@ -118,59 +118,85 @@ pub fn point(app: &AppHandle, shot: ShotRect, points: &[ask::Point], text: &str)
 
 static PRESS: AtomicU64 = AtomicU64::new(0);
 static HELD: AtomicBool = AtomicBool::new(false);
-static LISTEN: Mutex<Option<crate::voice::Listening>> = Mutex::new(None);
+static PRESSED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+/// The microphone for press `n`, once Windows has it ready (or why it couldn't).
+static VOICE: Mutex<Option<(u64, Result<crate::voice::Listening, String>)>> = Mutex::new(None);
 static GUIDING: AtomicBool = AtomicBool::new(false);
+
+fn same_press_held(n: u64) -> bool {
+    PRESS.load(Ordering::SeqCst) == n && HELD.load(Ordering::SeqCst)
+}
 
 pub fn on_press(app: &AppHandle) {
     let n = PRESS.fetch_add(1, Ordering::SeqCst) + 1;
     app_ask::diag("hotkey pressed");
     HELD.store(true, Ordering::SeqCst);
+    if let Ok(mut t) = PRESSED_AT.lock() { *t = Some(Instant::now()); }
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(HOLD);
-        // Still the same press, still held: listen.
-        if PRESS.load(Ordering::SeqCst) != n || !HELD.load(Ordering::SeqCst) { return; }
+        // A tap opens the panel (on release); only a hold starts the mic.
+        if !same_press_held(n) { return; }
         GUIDING.store(false, Ordering::SeqCst);
-        // Live captions, at most ~12 updates a second.
+        // Windows takes a moment to open the mic: say so, then chime when ready.
+        show(&app, Buddy { mode: "starting".into(), ..Default::default() });
+        // Live captions while the keys are held, at most ~12 updates a second.
         let (app2, last) = (app.clone(), Mutex::new(Instant::now() - Duration::from_secs(1)));
         let live = move |words: String| {
+            if !same_press_held(n) { return; }
             let Ok(mut l) = last.lock() else { return };
             if l.elapsed() < Duration::from_millis(80) { return; }
             *l = Instant::now();
             show(&app2, Buddy { mode: "listening".into(), said: words, ..Default::default() });
         };
-        match crate::voice::start(live) {
-            Ok(l) => {
-                if let Ok(mut slot) = LISTEN.lock() { *slot = Some(l); }
-                show(&app, Buddy { mode: "listening".into(), ..Default::default() });
+        let started = crate::voice::start(live);
+        match &started {
+            Ok(_) => {
+                app_ask::diag("voice listening");
+                if same_press_held(n) { show(&app, Buddy { mode: "listening".into(), ..Default::default() }); }
             }
-            Err(e) => { app_ask::diag(&format!("voice start failed: {e}")); show(&app, Buddy { mode: "error".into(), text: e, ..Default::default() }) }
+            Err(e) => {
+                app_ask::diag(&format!("voice start failed: {e}"));
+                show(&app, Buddy { mode: "error".into(), text: e.clone(), ..Default::default() });
+            }
         }
+        if let Ok(mut v) = VOICE.lock() { *v = Some((n, started)); }
     });
 }
 
 pub fn on_release(app: &AppHandle) {
     HELD.store(false, Ordering::SeqCst);
-    app_ask::diag("hotkey released");
-    let listening = LISTEN.lock().ok().and_then(|mut l| l.take());
-    match listening {
-        Some(l) => {
-            let app = app.clone();
-            std::thread::spawn(move || {
-                show(&app, Buddy { mode: "thinking".into(), said: LAST.lock().ok().and_then(|l| l.as_ref().and_then(|v| v.get("said")?.as_str().map(str::to_owned))).unwrap_or_default(), ..Default::default() });
-                match l.finish() {
-                    Ok(said) if !said.is_empty() => voice_ask(&app, said),
-                    Ok(_) => { app_ask::diag("voice heard nothing"); show(&app, Buddy { mode: "error".into(), text: "I didn't catch that. Hold the keys and speak, then let go.".into(), ..Default::default() }) }
-                    Err(e) => { app_ask::diag(&format!("voice failed: {e}")); show(&app, Buddy { mode: "error".into(), text: e, ..Default::default() }) }
-                }
-            });
-        }
-        None => {
-            // A tap: stop any guide, then the usual Ask panel.
-            if GUIDING.swap(false, Ordering::SeqCst) { hide(app); return; }
-            app_ask::on_hotkey(app);
-        }
+    let n = PRESS.load(Ordering::SeqCst);
+    let held = PRESSED_AT.lock().ok().and_then(|t| *t).map(|t| t.elapsed()).unwrap_or_default();
+    app_ask::diag(&format!("hotkey released after {} ms", held.as_millis()));
+    if held < HOLD {
+        // A tap: stop any guide, then the usual Ask panel.
+        if GUIDING.swap(false, Ordering::SeqCst) { hide(app); return; }
+        app_ask::on_hotkey(app);
+        return;
     }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let said_so_far = LAST.lock().ok().and_then(|l| l.as_ref().and_then(|v| v.get("said")?.as_str().map(str::to_owned))).unwrap_or_default();
+        show(&app, Buddy { mode: "thinking".into(), said: said_so_far, ..Default::default() });
+        // The mic may still be starting if you let go quickly: wait for it.
+        let start = Instant::now();
+        let voice = loop {
+            let got = VOICE.lock().ok().and_then(|mut v| if v.as_ref().is_some_and(|(id, _)| *id == n) { v.take() } else { None });
+            if let Some((_, r)) = got { break Some(r); }
+            if start.elapsed() > Duration::from_secs(6) { break None; }
+            std::thread::sleep(Duration::from_millis(40));
+        };
+        match voice {
+            Some(Ok(l)) => match l.finish() {
+                Ok(said) if !said.is_empty() => voice_ask(&app, said),
+                Ok(_) => show(&app, Buddy { mode: "error".into(), text: "I didn't catch that. Hold the keys, wait for the chime, speak, then let go.".into(), ..Default::default() }),
+                Err(e) => { app_ask::diag(&format!("voice failed: {e}")); show(&app, Buddy { mode: "error".into(), text: e, ..Default::default() }) }
+            },
+            Some(Err(_)) => {} // already shown when it failed to start
+            None => show(&app, Buddy { mode: "error".into(), text: "The microphone didn't start in time. Try holding the keys a little longer.".into(), ..Default::default() }),
+        }
+    });
 }
 
 // ---------- answering out loud ----------

@@ -127,6 +127,7 @@ export function Buddy() {
   const top = ay > 0.72 ? `calc(${ay * 100}% - 170px)` : `calc(${ay * 100}% + 24px)`;
   const body = clean(b.mode === "answer" && !b.text ? stream : b.text);
   const listening = b.mode === "listening";
+  const starting = b.mode === "starting";
   const thinking = b.mode === "thinking" || (b.mode === "answer" && !body);
 
   return (
@@ -164,7 +165,13 @@ export function Buddy() {
             </div>
           )}
 
-          {!listening && (thinking ? (
+          {starting && (
+            <p className="flex items-center gap-2 text-[13px] text-white/60">
+              <span className="flex gap-1">{[0, 1, 2].map((i) => <span key={i} className="dot h-1.5 w-1.5 rounded-full bg-[#fbbf24]/80" style={{ animationDelay: `${i * 0.15}s` }} />)}</span>
+              Mic starting · speak after the chime
+            </p>
+          )}
+          {!listening && !starting && (thinking ? (
             <p className="flex items-center gap-2 text-[13px] text-white/60">
               <span className="flex gap-1">{[0, 1, 2].map((i) => <span key={i} className="dot h-1.5 w-1.5 rounded-full bg-white/70" style={{ animationDelay: `${i * 0.15}s` }} />)}</span>
               {b.step > 1 ? `Looking for step ${b.step}` : "Thinking"}

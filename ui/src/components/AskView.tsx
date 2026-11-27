@@ -146,6 +146,18 @@ function speakText(t: string) {
   speechSynthesis.speak(new SpeechSynthesisUtterance(plain(t).slice(0, 1500)));
 }
 
+// An ask that has sent nothing for 4 minutes is over, whatever happened to it.
+setInterval(() => {
+  const id = session.busy;
+  if (!id || Date.now() - session.at < 240_000) return;
+  setSession((s) => ({
+    busy: null,
+    items: s.items.map((it) => it.id === id && !it.answer.done
+      ? { ...it, answer: { text: it.answer.text, done: { id, tool: null, reason: "", error: it.answer.text ? null : "No answer came back. Try again.", points: [], text: it.answer.text, opened_web: false } } }
+      : it),
+  }));
+}, 15_000);
+
 // One listener for the app's lifetime: answers keep arriving while the panel is closed.
 let listening = false;
 function listenOnce() {
@@ -213,7 +225,8 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
   useEffect(() => { end.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [items]);
 
   async function ask(question: string, action: AskAction = "ask") {
-    if (busy) return;
+    // A new question replaces one still running (it may be stuck).
+    if (busy) { api.askCancel(busy).catch(() => {}); setBusy(null); }
     const q = question.trim();
     if (!q && action === "ask" && !ctx?.selection && !ctx?.clipboard && !ctx?.screenshot) return;
     const id = `a${Date.now()}`;
@@ -253,12 +266,14 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
   function stop() { if (busy) { api.askCancel(busy); setBusy(null); } }
 
   function cycleTool() {
-    const order: (Tool | null)[] = [null, ...(ctx?.installed ?? [])];
+    const order: (Tool | null)[] = [null, ...askTools];
     const next = order[(order.indexOf(pinned) + 1) % order.length];
     setPinned(next);
     setPref("tool", next ?? "");
   }
 
+  // Ask uses Claude (and Codex as backup); Gemini isn't offered.
+  const askTools = (ctx?.installed ?? []).filter((t) => t !== "gemini");
   const forget = (part: "selection" | "clipboard" | "screenshot") => api.askForget(part).then(() => loadCtx(pinned));
   const actions = quickActions(ctx);
   const pick = ctx?.pick;
@@ -273,7 +288,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
           <button
             className="fade-in rounded-full px-2 py-0.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/[0.08] hover:text-fg"
             title="Start a new conversation"
-            onClick={() => { stop(); setItems([]); box.current?.focus(); }}
+            onClick={() => { stop(); setSession(() => ({ items: [], busy: null })); box.current?.focus(); }}
           >
             New chat
           </button>
@@ -359,7 +374,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
       {items.length === 0 && actions.length > 0 && (
         <div className="flex flex-wrap gap-1.5 px-0.5">
           {actions.map((a) => (
-            <button key={a} disabled={!!busy} className="btn !px-3 !py-1.5 text-[12px]" onClick={() => ask("", a)}>{actionLabel[a]}</button>
+            <button key={a} className="btn !px-3 !py-1.5 text-[12px]" onClick={() => ask("", a)}>{actionLabel[a]}</button>
           ))}
         </div>
       )}
@@ -397,8 +412,8 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
           </button>
           <button
             role="switch" aria-checked={council}
-            disabled={(ctx?.installed.length ?? 0) < 2}
-            title={(ctx?.installed.length ?? 0) < 2 ? "Council needs two or more AI tools installed" : "Ask Claude, Codex and Gemini at once, then combine the answers"}
+            disabled={askTools.length < 2}
+            title={askTools.length < 2 ? "Council needs both Claude Code and Codex installed" : "Ask Claude and Codex at once, then combine the answers"}
             onClick={() => { setCouncil(!council); box.current?.focus(); }}
             className={`rounded-full px-2.5 py-1 text-[11px] font-medium disabled:opacity-40 ${council ? "bg-[#DDD7F3] text-[#1C1535]" : "text-muted hover:text-fg"}`}
           >

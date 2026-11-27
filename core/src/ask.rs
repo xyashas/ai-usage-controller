@@ -223,24 +223,25 @@ pub struct Pick {
 
 /// The installed tool with the most room. A pinned tool wins unless it's out.
 pub fn pick(rooms: &[Room], pinned: Option<Tool>) -> Option<Pick> {
-    let ok: Vec<&Room> = rooms.iter().filter(|r| r.installed).collect();
+    // Ask runs on Claude. Codex only steps in when Claude can't answer (not
+    // installed, out of room, or failing). Gemini isn't used for Ask.
+    let ok: Vec<&Room> = rooms.iter().filter(|r| r.installed && r.tool != Tool::Gemini).collect();
+    let has_room = |r: &Room| r.used_pct.is_none_or(|u| u < 98.0);
     if let Some(p) = pinned {
-        if let Some(r) = ok.iter().find(|r| r.tool == p) {
-            if r.used_pct.is_none_or(|u| u < 98.0) { return Some(Pick { tool: p, reason: "your pick".into() }); }
+        if let Some(r) = ok.iter().find(|r| r.tool == p).filter(|r| has_room(r)) {
+            return Some(Pick { tool: r.tool, reason: "your pick".into() });
         }
     }
-    // Most room wins, but Gemini only when it clearly has more: its CLI is the
-    // least dependable for quick answers (slow start, Google's login changes).
-    let load = |r: &Room| r.used_pct.unwrap_or(50.0) + if r.tool == Tool::Gemini { 40.0 } else { 0.0 };
-    let best = ok.iter().min_by(|a, b| load(a).total_cmp(&load(b)))?;
-    let full: Vec<String> = rooms.iter()
-        .filter_map(|r| r.used_pct.filter(|&u| r.tool != best.tool && u >= 80.0).map(|u| format!("{} is at {u:.0}%", tool_label(r.tool))))
-        .collect();
-    let reason = if !full.is_empty() { full.join(", ") }
-        else if let Some(p) = pinned.filter(|&p| p != best.tool) { format!("{} is out of room", tool_label(p)) }
-        else if ok.len() == 1 { "the only one installed".into() }
-        else { "most room".into() };
-    Some(Pick { tool: best.tool, reason })
+    let claude = ok.iter().find(|r| r.tool == Tool::ClaudeCode);
+    if let Some(c) = claude.filter(|r| has_room(r)) {
+        return Some(Pick { tool: c.tool, reason: String::new() });
+    }
+    let next = ok.iter().filter(|r| r.tool != Tool::ClaudeCode).find(|r| has_room(r)).or_else(|| ok.first())?;
+    let reason = match claude {
+        Some(c) => format!("Claude is at {:.0}%", c.used_pct.unwrap_or(100.0)),
+        None => "Claude isn't available".into(),
+    };
+    Some(Pick { tool: next.tool, reason })
 }
 
 // ---------- the command line ----------

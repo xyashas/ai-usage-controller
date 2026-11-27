@@ -7,15 +7,17 @@ fn room(tool: Tool, installed: bool, used: Option<f64>) -> Room {
 }
 
 #[test]
-fn picks_the_installed_tool_with_most_room() {
-    let rooms = [room(Tool::ClaudeCode, true, Some(96.0)), room(Tool::Codex, true, Some(30.0)), room(Tool::Gemini, false, Some(5.0))];
-    let p = ask::pick(&rooms, None).unwrap();
-    assert_eq!(p.tool, Tool::Codex, "Gemini has more room but isn't installed");
-    assert_eq!(p.reason, "Claude is at 96%");
+fn ask_uses_claude_and_falls_back_to_codex() {
+    let rooms = [room(Tool::ClaudeCode, true, Some(70.0)), room(Tool::Codex, true, Some(10.0)), room(Tool::Gemini, true, Some(1.0))];
+    assert_eq!(ask::pick(&rooms, None).unwrap().tool, Tool::ClaudeCode, "Claude even when others have more room");
+    let full = [room(Tool::ClaudeCode, true, Some(99.0)), room(Tool::Codex, true, Some(40.0))];
+    let p = ask::pick(&full, None).unwrap();
+    assert_eq!((p.tool, p.reason.as_str()), (Tool::Codex, "Claude is at 99%"));
+    assert_eq!(ask::pick(&full, Some(Tool::ClaudeCode)).unwrap().tool, Tool::Codex, "a pinned tool that's out of room is skipped");
     assert_eq!(ask::pick(&rooms, Some(Tool::Codex)).unwrap().reason, "your pick");
-    let out = ask::pick(&[room(Tool::ClaudeCode, true, Some(99.0)), room(Tool::Codex, true, Some(40.0))], Some(Tool::ClaudeCode)).unwrap();
-    assert_eq!(out.tool, Tool::Codex, "a pinned tool that's out of room is skipped");
-    assert_eq!(ask::pick(&[room(Tool::Gemini, true, None)], None).unwrap().reason, "the only one installed");
+    let p = ask::pick(&[room(Tool::ClaudeCode, false, None), room(Tool::Codex, true, None)], None).unwrap();
+    assert_eq!((p.tool, p.reason.as_str()), (Tool::Codex, "Claude isn't available"));
+    assert!(ask::pick(&[room(Tool::Gemini, true, None)], None).is_none(), "Gemini is never used for Ask");
     assert!(ask::pick(&[room(Tool::Codex, false, Some(1.0))], None).is_none());
 }
 

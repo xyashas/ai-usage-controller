@@ -508,7 +508,8 @@ pub fn answer(app: Option<&AppHandle>, id: &str, mut rooms: Vec<Room>, mut pick:
 
 /// All installed tools answer at once; then the one with most room combines them.
 fn council(app: &AppHandle, req: &AskRequest, rooms: &[Room], prompt: &str, image: Option<&std::path::Path>) {
-    let tools: Vec<Tool> = rooms.iter().filter(|r| r.installed && r.used_pct.is_none_or(|u| u < 98.0)).map(|r| r.tool).collect();
+    // Claude and Codex (Gemini's CLI isn't dependable enough to wait on).
+    let tools: Vec<Tool> = rooms.iter().filter(|r| r.installed && r.tool != Tool::Gemini && r.used_pct.is_none_or(|u| u < 98.0)).map(|r| r.tool).collect();
     let answers = Arc::new(Mutex::new(Vec::<(Tool, String)>::new()));
     let handles: Vec<_> = tools.iter().map(|&t| {
         let (app, answers, id, prompt, image, mode) = (app.clone(), answers.clone(), format!("{}:{}", req.id, t.as_str()), prompt.to_owned(), image.map(|p| p.to_path_buf()), req.mode);
