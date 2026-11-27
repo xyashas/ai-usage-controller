@@ -142,7 +142,7 @@ fn open_app(target: Tool) -> bool {
 }
 
 /// Start `target`'s CLI in a new terminal in `cwd`, with `first` as its first message.
-fn open_terminal(cwd: &Path, target: Tool, first: &str) -> Result<bool, String> {
+pub fn open_terminal(cwd: &Path, target: Tool, first: &str) -> Result<bool, String> {
     let cli = handoff::cli(target).ok_or("That CLI is no longer installed.")?;
     #[cfg(windows)]
     let started = {

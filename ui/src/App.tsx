@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { HandoffPreview, type Draft } from "./components/HandoffPreview";
 import type { HandoffOffer, RepoStatus, Tool, Snapshot } from "./types";
 import { HandoffHub } from "./components/HandoffHub";
+import { AgentsView } from "./components/AgentsView";
 import { api, inTauri, onHover, onOpenView, onSnapshot, onToggle } from "./api";
 import { Collapsed } from "./components/Collapsed";
 import { Expanded } from "./components/Expanded";
@@ -11,7 +12,7 @@ import { SettingsView } from "./components/SettingsView";
 import { Onboarding } from "./components/Onboarding";
 import { CheckSetup } from "./components/CheckSetup";
 
-export type View = "panel" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
+export type View = "panel" | "agents" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
 type Platform = "macos" | "windows" | "linux";
 
 const PANEL_W = 520;
@@ -232,6 +233,8 @@ export default function App() {
             <div ref={innerRef} style={{ paddingTop: mac ? notch : 0 }}>
             {view === "handoff" && draft ? (
               <HandoffPreview draft={draft} onBack={() => { setDraft(null); setView(backTo.current === "handoff" ? "panel" : backTo.current); }} />
+            ) : view === "agents" ? (
+              <AgentsView snap={snap} onView={goto} refresh={refresh} />
             ) : view === "handoffs" ? (
               <HandoffHub onView={goto} onHandoff={preview} onRepoHandoff={previewRepo} />
             ) : view === "onboarding" ? (

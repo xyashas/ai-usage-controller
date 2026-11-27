@@ -115,9 +115,29 @@ pub struct HandoffOffer {
     pub targets: Vec<Tool>,
 }
 
+/// A task started from the dispatcher, with what its session is doing.
+#[derive(Clone, Debug, Serialize)]
+pub struct AgentRun {
+    pub id: i64,
+    pub tool: Tool,
+    pub text: String,
+    pub repo_name: String,
+    pub branch: Option<String>,
+    pub cwd: String,
+    pub started_at: DateTime<Utc>,
+    /// "starting" (no activity yet), "working" (active in the last 90 s),
+    /// "idle" (waiting for you, or done), "no_activity" (never started).
+    pub state: String,
+    pub cost_usd: f64,
+    pub requests: u64,
+    pub last_activity_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub generated_at: DateTime<Utc>,
+    /// Dispatcher tasks from the last 24 hours, newest first.
+    pub agents: Vec<AgentRun>,
     pub handoffs: Vec<HandoffOffer>,
     pub gauge_history: Vec<GaugePoint>,
     pub idle_hidden: bool,

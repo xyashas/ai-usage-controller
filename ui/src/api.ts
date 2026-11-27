@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Alert, Dest, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
+import type { Alert, Dest, DispatchPlan, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -17,6 +17,10 @@ export const api = {
   previewRepoHandoff: (path: string, target: Tool) => call<HandoffPreviewData>("preview_repo_handoff", { path, target }),
   testHandoffOffers: () => call<HandoffOffer[]>("test_handoff_offers"),
   launchHandoff: (id: number, prompt: string, dest: Dest) => call<string>("launch_handoff", { id, prompt, dest }),
+  planDispatch: (text: string) => call<DispatchPlan>("plan_dispatch", { text }),
+  runDispatch: (repo: string, tasks: { text: string; tool: Tool }[], worktrees: boolean) => call<Started[]>("run_dispatch", { repo, tasks, worktrees }),
+  dismissAgent: (id: number) => call<void>("dismiss_agent", { id }),
+  startDictation: () => call<void>("start_dictation"),
   listRepos: (fetch: boolean) => call<RepoStatus[]>("list_repos", { fetch }),
   setupRepo: (path: string, commit: boolean) => call<SetupResult>("setup_repo", { path, commit }),
   addRepo: () => call<string | null>("add_repo"),
@@ -72,7 +76,7 @@ export async function onHover(cb: (inside: boolean) => void): Promise<() => void
 export async function onOpenView(cb: (v: string) => void): Promise<() => void> {
   if (!inTauri) {
     const preview = new URLSearchParams(location.search).get("view");
-    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding", "handoffs"].includes(preview)) cb(preview);
+    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding", "handoffs", "agents"].includes(preview)) cb(preview);
     return () => {};
   }
   const { listen } = await import("@tauri-apps/api/event");
@@ -103,6 +107,11 @@ let mockSettings: Settings = {
   api_base: "https://api.aiusage.dev",
 };
 const dismissed = new Set<string>();
+const mockAgents: Snapshot["agents"] = mockScenario === "empty" ? [] : [
+  { id: 3, tool: "codex", text: "Fix the failing checkout test", repo_name: "acme-web", branch: "agents/fix-failing-checkout-test", cwd: "", started_at: inMin(-6), state: "working", cost_usd: 0.42, requests: 18, last_activity_at: inMin(0) },
+  { id: 2, tool: "claude_code", text: "Update the docs for the new coupon API", repo_name: "acme-web", branch: "agents/update-docs-new-coupon-api", cwd: "", started_at: inMin(-6), state: "idle", cost_usd: 1.18, requests: 26, last_activity_at: inMin(-2) },
+  { id: 1, tool: "gemini", text: "Summarise open issues labelled bug", repo_name: "acme-api", branch: null, cwd: "", started_at: inMin(-1), state: "starting", cost_usd: 0, requests: 0, last_activity_at: null },
+];
 const mockRepos: RepoStatus[] = mockScenario === "empty" ? [] : [
   { root: "/Users/you/dev/acme-web", name: "acme/web", set_up: true, current_branch: "main", github: "https://github.com/acme/web",
     latest: { branch: "claude/fix-login", updated_at: Date.now() / 1000 - 760, origin: "commit", content: "# Handoff" } },
@@ -149,6 +158,7 @@ function mockSnapshot(): Snapshot {
   if (claudeLeft <= 20)
     alerts.push({ id: `low:${claudeLeft <= 5 ? "red" : "amber"}`, level: claudeLeft <= 5 ? "red" : "amber", kind: "low_headroom", tool: "claude_code", message: `Claude 5-hour limit ${Math.round(100 - claudeLeft)}% used, about 20 min left at this pace`, action: paid ? { kind: "switch", label: "Switch to Codex", target_tool: "codex" } : { kind: "dismiss", label: "Dismiss", target_tool: null }, session_id: null, project: null, burn_usd_per_min: null });
   return {
+    agents: mockAgents.filter((a) => !dismissed.has(`agent:${a.id}`)),
     handoffs: mockScenario === "critical" ? [{ source: "claude_code", session: "s", targets: ["codex", "gemini"] }] : [],
     gauge_history: ["empty", "learning", "unconnected"].includes(mockScenario) ? [] : Array.from({length: 97}, (_, i) => ({
       at: stamp - (96 - i) * 900000, used: i === 96 ? 100 - claudeLeft : (i % 20) * 4,
@@ -204,6 +214,25 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     };
     case "launch_handoff": return args!.dest === "terminal" ? "Codex is starting in a terminal." : "Prompt copied. Paste it into Codex in the Codex app.";
     case "list_repos": return mockRepos;
+    case "plan_dispatch": {
+      const rooms = [
+        { tool: "claude_code", ready: true, used_pct: 64, active: true },
+        { tool: "codex", ready: true, used_pct: 24, active: false },
+        { tool: "gemini", ready: true, used_pct: 9, active: false },
+      ] as const;
+      const names: Record<string, Tool> = { claude: "claude_code", codex: "codex", gemini: "gemini" };
+      const parts = String(args!.text).split(/\n|;|,?\s+(?:and|then)\s+(?=(?:have |ask |use )?(?:claude|codex|gemini)\b)/i).map((p) => p.trim()).filter(Boolean);
+      let turn = 0;
+      const tasks = parts.map((p) => {
+        const m = p.match(/^(?:please\s+)?(?:have|ask|use|let|tell)?\s*(claude(?: code)?|codex|gemini)[:,]?\s+(?:to\s+)?(.*)$/i);
+        const tool = m ? names[m[1].toLowerCase().split(" ")[0]] : (["gemini", "codex"] as Tool[])[turn++ % 2];
+        const text = (m ? m[2] : p).replace(/^./, (c) => c.toUpperCase());
+        return { text, tool, explicit: !!m, reason: m ? `You asked for ${tool === "claude_code" ? "Claude Code" : tool === "codex" ? "Codex" : "Gemini"}` : `Most room: ${tool === "gemini" ? 9 : 24}% used` };
+      });
+      return { tasks, rooms };
+    }
+    case "run_dispatch": return (args!.tasks as { text: string; tool: Tool }[]).map((t) => ({ ...t, branch: args!.worktrees ? "agents/x" : "main", error: null }));
+    case "dismiss_agent": dismissed.add(`agent:${args!.id}`); return null;
     case "setup_repo": { const r = mockRepos.find((x) => x.root === args!.path); if (r) r.set_up = true; return { root: args!.path, changed: [".aiuc/hook.mjs", "AGENTS.md", "CLAUDE.md", ".claude/settings.json"], committed: !!args!.commit }; }
     case "add_repo": return null;
     case "get_snapshot": return mockSnapshot();

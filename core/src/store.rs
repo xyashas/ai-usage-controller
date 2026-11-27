@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS cursors (
   path TEXT PRIMARY KEY, offset INTEGER NOT NULL, size INTEGER NOT NULL, mtime INTEGER NOT NULL, ctx TEXT
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- Tasks started from the dispatcher: the local outcomes ledger. Task text is
+-- kept on this machine only (never synced), like the handoff file.
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, repo TEXT NOT NULL,
+  cwd TEXT NOT NULL, branch TEXT, tool TEXT NOT NULL, text TEXT NOT NULL,
+  dismissed INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS savings (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, amount REAL NOT NULL, note TEXT NOT NULL
 );
@@ -320,6 +327,39 @@ impl Store {
         Ok(())
     }
 
+    pub fn insert_task(&self, t: &TaskRow) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO tasks (created_at, repo, cwd, branch, tool, text) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![ms(t.created_at), t.repo, t.cwd, t.branch, t.tool.as_str(), t.text],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Tasks started since `from` that weren't dismissed, newest first.
+    pub fn tasks_since(&self, from: DateTime<Utc>) -> Result<Vec<TaskRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, created_at, repo, cwd, branch, tool, text FROM tasks WHERE created_at >= ?1 AND dismissed = 0 ORDER BY created_at DESC, id DESC",
+        )?;
+        let rows = stmt.query_map(params![ms(from)], |r| {
+            let tool: String = r.get(5)?;
+            Ok(TaskRow {
+                id: r.get(0)?,
+                created_at: from_ms(r.get(1)?),
+                repo: r.get(2)?,
+                cwd: r.get(3)?,
+                branch: r.get(4)?,
+                tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
+                text: r.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn dismiss_task(&self, id: i64) -> Result<()> {
+        self.conn.execute("UPDATE tasks SET dismissed = 1 WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     pub fn add_saving(&self, ts: DateTime<Utc>, kind: &str, amount: f64, note: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO savings (ts, kind, amount, note) VALUES (?1,?2,?3,?4)",
@@ -337,4 +377,16 @@ impl Store {
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
+}
+
+/// A task started from the dispatcher.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskRow {
+    pub id: i64,
+    pub created_at: DateTime<Utc>,
+    pub repo: String,
+    pub cwd: String,
+    pub branch: Option<String>,
+    pub tool: Tool,
+    pub text: String,
 }

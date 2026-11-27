@@ -62,6 +62,7 @@ export interface Entitlements { tier: Tier; trial_ends_at: string | null; trial_
 export interface HandoffOffer { source: Tool; session: string; targets: Tool[] }
 
 export interface Snapshot {
+  agents: AgentRun[];
   handoffs: HandoffOffer[];
   gauge_history: { at: number; used: number; reset_at: number | null }[];
   idle_hidden: boolean;
@@ -129,3 +130,9 @@ export interface HandoffPreviewData { id: number; prompt: string; destinations: 
 export interface RepoLatest { branch: string; updated_at: number; origin: "commit" | "working tree"; content: string }
 export interface RepoStatus { root: string; name: string; set_up: boolean; current_branch: string; github: string | null; latest: RepoLatest | null }
 export interface SetupResult { root: string; changed: string[]; committed: boolean }
+
+export interface AgentRun { id: number; tool: Tool; text: string; repo_name: string; branch: string | null; cwd: string; started_at: string; state: "starting" | "working" | "idle" | "no_activity"; cost_usd: number; requests: number; last_activity_at: string | null }
+export interface Routed { text: string; tool: Tool | null; explicit: boolean; reason: string }
+export interface ToolRoom { tool: Tool; ready: boolean; used_pct: number | null; active: boolean }
+export interface DispatchPlan { tasks: Routed[]; rooms: ToolRoom[] }
+export interface Started { text: string; tool: Tool; branch: string | null; error: string | null }

@@ -9,6 +9,7 @@ import { countdown, usd, usedPct } from "../format";
 import { api } from "../api";
 import { alertTint, stateColor, tint, toolName, warnTint } from "../theme";
 import { ArrowIcon } from "./icons";
+import { StateDot } from "./AgentsView";
 
 /** The window shown first: the 5-hour limit when there is one, else the tightest. */
 export function primaryWindow(t: ToolStatus): WindowStatus | undefined {
@@ -191,6 +192,27 @@ function AlertCard({ alert, snap, offer, cloud, onHandoff, onRepoHandoff, refres
   );
 }
 
+/** One line for running agents on the usage panel. */
+function AgentStrip({ agents, onOpen }: { agents: Snapshot["agents"]; onOpen: () => void }) {
+  const working = agents.filter((a) => a.state === "working" || a.state === "starting").length;
+  const waiting = agents.filter((a) => a.state === "idle").length;
+  const parts = [working && `${working} working`, waiting && `${waiting} waiting for you`].filter(Boolean).join(" · ");
+  return (
+    <button onClick={onOpen} className="tile fade-in flex items-center gap-3 !py-2.5 text-left transition-colors hover:bg-[#1b1b1e]">
+      <span className="flex -space-x-1.5">
+        {agents.slice(0, 4).map((a) => (
+          <span key={a.id} className="flex h-6 w-6 items-center justify-center rounded-lg ring-2 ring-[#141416]" style={{ background: tint[a.tool].bg, color: tint[a.tool].ink }}>
+            <ToolMark tool={a.tool} />
+          </span>
+        ))}
+      </span>
+      <span className="flex-1 text-[12.5px] font-medium">Agents{parts ? ` · ${parts}` : ""}</span>
+      {waiting > 0 && <StateDot state="idle" />}
+      <span className="text-[12px] text-muted">Open →</span>
+    </button>
+  );
+}
+
 function Stat({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
     <div className="min-w-0">
@@ -238,6 +260,8 @@ export function Expanded({ snap, onView, refresh, onHandoff, onRepoHandoff }: {
       <TopBar tab="panel" onView={onView} />
 
       {alert && <AlertCard alert={alert} snap={snap} offer={alertOffer} cloud={cloud} onHandoff={onHandoff} onRepoHandoff={onRepoHandoff} refresh={refresh} />}
+
+      {snap.agents.some((a) => a.state !== "no_activity") && <AgentStrip agents={snap.agents} onOpen={() => onView("agents")} />}
 
       {otherOffers.map((o) => (
         <section key={o.source} className="tile fade-in space-y-2.5">

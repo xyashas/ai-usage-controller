@@ -170,6 +170,42 @@ impl Engine {
     /// tried without burning a plan limit to 90%.
     /// Project folders of Claude Code and Codex sessions in the last two weeks,
     /// most recent first. Used to suggest repositories for handoffs.
+    /// Dispatcher tasks from the last 24 hours and what their sessions are
+    /// doing, matched by folder: each task runs in its own folder (worktree).
+    pub fn agent_runs(&self, now: DateTime<Utc>, recent: &BTreeMap<Tool, Vec<UsageEvent>>) -> Result<Vec<crate::snapshot::AgentRun>> {
+        let mut out = Vec::new();
+        for t in self.store.tasks_since(now - Duration::hours(24))? {
+            let events: Vec<&UsageEvent> = recent.get(&t.tool).into_iter().flatten()
+                .filter(|e| e.ts >= t.created_at - Duration::seconds(10) && e.ts <= now)
+                .filter(|e| e.project.as_deref().is_some_and(|p| crate::dispatch::same_folder(p, &t.cwd)))
+                .collect();
+            let last = events.iter().map(|e| e.ts).max();
+            let state = match last {
+                Some(l) if now - l <= Duration::seconds(90) => "working",
+                Some(_) => "idle",
+                None if now - t.created_at <= Duration::minutes(5) => "starting",
+                None => "no_activity",
+            };
+            let repo_name = std::path::Path::new(&t.repo).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            out.push(crate::snapshot::AgentRun {
+                id: t.id, tool: t.tool, text: t.text, repo_name, branch: t.branch, cwd: t.cwd,
+                started_at: t.created_at, state: state.into(),
+                cost_usd: events.iter().map(|e| e.cost_usd).sum(),
+                requests: events.len() as u64,
+                last_activity_at: last,
+            });
+        }
+        Ok(out)
+    }
+
+    pub fn record_task(&self, row: &crate::store::TaskRow) -> Result<i64> {
+        self.store.insert_task(row)
+    }
+
+    pub fn dismiss_task(&self, id: i64) -> Result<()> {
+        self.store.dismiss_task(id)
+    }
+
     pub fn recent_projects(&self, now: DateTime<Utc>) -> Result<Vec<PathBuf>> {
         let mut seen: Vec<(DateTime<Utc>, PathBuf)> = Vec::new();
         for tool in [Tool::ClaudeCode, Tool::Codex] {
@@ -643,7 +679,9 @@ impl Engine {
 
         let savings: f64 = self.store.savings_since(metrics::month_start_local(now))?.iter().map(|s| s.amount_usd).sum();
 
+        let agents = self.agent_runs(now, &recent_by_tool)?;
         let mut snap = Snapshot {
+            agents,
             handoffs: vec![],
             gauge_history: vec![],
             idle_hidden: self.settings.onboarded && self.settings.hide_when_idle

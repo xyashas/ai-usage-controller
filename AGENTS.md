@@ -244,6 +244,23 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    the alert offers the newest repo handoff from the last 12 h.
    Next: Codex limits for cloud-only users (ChatGPT account connection,
    feasibility unverified); cloud token counts for the meter.
+1d. **Agent dispatcher (Agents tab, Alt+Shift+A).** Type or dictate a request;
+   `core/src/dispatch.rs` splits it into tasks with plain rules (newline, `;`, or a
+   comma/"and"/"then" followed by a named tool; "fix X and add tests" stays one
+   task; "Claude and Codex …" is a list, not a directive) and routes each: a named
+   tool wins, otherwise the ready tool (CLI installed) with the most room on its
+   5-hour limit, +10 points per task already given to it in the batch so parallel
+   work spreads out; ≥90% used goes last. Each task can get its own worktree
+   (`<parent>/<repo>.agents/<slug>` on branch `agents/<slug>`, default on for 2+
+   tasks) and opens its CLI in a terminal with the task as the first message.
+   Every task is written to the local `tasks` table (the outcomes ledger, the base
+   for learned routing later). `Engine::agent_runs` matches each task to session
+   events by folder and tool: starting / working (activity ≤90 s) / idle ("Your
+   turn") / no_activity; with cost and request counts. Shown in the Agents tab and
+   as a strip on the Usage panel. Dictation uses the OS: Win+H (sent with
+   `keybd_event`) or macOS `startDictation:`; nothing is recorded by the app.
+   Next: approvals from the notch (Claude Code hooks), verified "done" (run tests
+   when an agent goes idle), task queue at limit reset, morning brief, learned routing.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).
@@ -257,7 +274,9 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
 
 ## Conventions
 - Keep UI copy plain and short; show % used; label estimates as "est.".
-- The user-confirmed local handoff file is the explicit persistence exception.
+- The user-confirmed local handoff file and the dispatcher's local `tasks` table
+  (task text you typed, kept on this machine, never synced) are the explicit
+  persistence exceptions.
   In usage tracking, never store or sync prompt text, code, file names or
   project names (sync sends counts only — there's a test for this). Keep it that way.
 - New core logic gets a test in `core/tests/core.rs`.

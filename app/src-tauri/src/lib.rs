@@ -1,4 +1,5 @@
 mod claude_web;
+mod dispatch;
 mod hover;
 mod handoff;
 mod window;
@@ -21,6 +22,8 @@ use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
+/// Opens the panel on the Agents tab with the task box focused.
+const DISPATCH_HOTKEY: &str = "Alt+Shift+A";
 const TICK: Duration = Duration::from_secs(3);
 const LIVE_EVERY: Duration = Duration::from_secs(60);
 const SYNC_EVERY: Duration = Duration::from_secs(60);
@@ -627,13 +630,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
                         if let Some(w) = window::widget(app) {
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
-                        let _ = app.emit("toggle", ());
+                        // The dispatcher's hotkey opens straight into the task box.
+                        let dispatch = DISPATCH_HOTKEY.parse::<tauri_plugin_global_shortcut::Shortcut>().ok();
+                        if dispatch.is_some_and(|d| d.id() == shortcut.id()) {
+                            let _ = app.emit("open-view", "agents");
+                        } else {
+                            let _ = app.emit("toggle", ());
+                        }
                     }
                 })
                 .build(),
@@ -656,6 +665,10 @@ pub fn run() {
             add_repo,
             forget_repo,
             preview_repo_handoff,
+            dispatch::plan_dispatch,
+            dispatch::run_dispatch,
+            dispatch::dismiss_agent,
+            dispatch::start_dictation,
             get_settings,
             save_settings,
             get_plans,
@@ -694,6 +707,9 @@ pub fn run() {
 
             if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
                 eprintln!("hotkey {hotkey} unavailable: {e}");
+            }
+            if let Err(e) = app.global_shortcut().register(DISPATCH_HOTKEY) {
+                eprintln!("hotkey {DISPATCH_HOTKEY} unavailable: {e}");
             }
 
             if let Ok(eng) = engine.lock() {

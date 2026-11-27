@@ -50,6 +50,16 @@ were working in the cloud.
 The widget prepares handoffs locally and sends nothing to its API. The hook never uses
 the network and redacts things that look like keys before writing.
 
+## Run several agents at once
+
+Press **Alt+Shift+A** (⌥⇧A on a Mac) or open the **Agents** tab. Type or dictate
+something like *"Have Codex fix the failing checkout test, and Claude update the docs"*.
+The widget splits that into tasks and gives each to the tool you named, or to the tool
+with the most room left. With **Worktrees** on, each task runs on its own branch in a
+separate folder, so the agents don't edit the same files. Each task opens in its own
+terminal. The Agents list shows each task as working or waiting for you, with its
+cost so far. Task text stays on your computer.
+
 ## What's in v1
 
 | # | Feature | Plan | Where |

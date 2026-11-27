@@ -11,6 +11,7 @@
 //! which never leaves the machine.
 
 pub mod advice;
+pub mod dispatch;
 pub mod engine;
 pub mod handoff;
 pub mod entitlements;
