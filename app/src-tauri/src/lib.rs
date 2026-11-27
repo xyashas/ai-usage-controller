@@ -13,6 +13,8 @@ mod dispatch;
 mod hover;
 mod handoff;
 mod voice;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+mod whisper_local;
 mod window;
 
 use aiuc_core::model::Tool;

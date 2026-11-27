@@ -188,10 +188,15 @@ pub fn on_release(app: &AppHandle) {
             std::thread::sleep(Duration::from_millis(40));
         };
         match voice {
-            Some(Ok(l)) => match l.finish() {
+            Some(Ok(l)) => {
+                let app_st = app.clone();
+                match l.finish(move |status| {
+                    show(&app_st, Buddy { mode: "thinking".into(), said: status.to_owned(), ..Default::default() });
+                }) {
                 Ok(said) if !said.is_empty() => voice_ask(&app, said),
                 Ok(_) => show(&app, Buddy { mode: "error".into(), text: "I didn't catch that. Hold the keys, wait for the chime, speak, then let go.".into(), ..Default::default() }),
                 Err(e) => { app_ask::diag(&format!("voice failed: {e}")); show(&app, Buddy { mode: "error".into(), text: e, ..Default::default() }) }
+                }
             },
             Some(Err(_)) => {} // already shown when it failed to start
             None => show(&app, Buddy { mode: "error".into(), text: "The microphone didn't start in time. Try holding the keys a little longer.".into(), ..Default::default() }),
