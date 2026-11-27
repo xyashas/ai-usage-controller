@@ -5,16 +5,16 @@ import type { BuddyState } from "../types";
 const mac = navigator.userAgent.includes("Mac");
 const KEY = mac ? "⌥⇧Space" : "Alt+Shift+Space";
 
-/** The most natural-sounding voice on this computer. */
+/** Only pick a genuinely natural/neural voice; skip robotic legacy SAPI5 desktop voices (David/Zira/Mark). */
 function bestVoice(): SpeechSynthesisVoice | undefined {
   const all = speechSynthesis.getVoices();
   const lang = navigator.language.slice(0, 2);
   const mine = all.filter((v) => v.lang.startsWith(lang));
   const pool = mine.length ? mine : all.filter((v) => v.lang.startsWith("en"));
-  return pool.find((v) => /natural|neural/i.test(v.name))
-    ?? pool.find((v) => /online/i.test(v.name))
-    ?? pool.find((v) => /aria|jenny|guy|samantha|ava|allison|daniel|karen/i.test(v.name))
-    ?? pool.find((v) => v.default) ?? pool[0];
+  const nonRobotic = pool.filter((v) => !/\b(desktop|david|zira|mark|hazel|george|heera|ravi)\b/i.test(v.name));
+  return nonRobotic.find((v) => /natural|neural/i.test(v.name))
+    ?? nonRobotic.find((v) => /online/i.test(v.name))
+    ?? nonRobotic.find((v) => /aria|jenny|ava|andrew|emma|brian|guy|samantha|allison|daniel|karen|serena|enhanced|premium/i.test(v.name));
 }
 
 /** A soft two-note blip: up when listening starts, down when it stops. */
@@ -76,11 +76,13 @@ export function Buddy() {
 
     const say = (text: string, then: () => void) => {
       if (!("speechSynthesis" in window)) return then();
+      const v = bestVoice();
+      // Skip auto-reading aloud when only legacy robotic desktop voices are installed.
+      if (!v) return then();
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text.slice(0, 900));
-      const v = bestVoice();
-      if (v) u.voice = v;
-      u.rate = 1.04;
+      u.voice = v;
+      u.rate = 1.0;
       setSpoken(0);
       u.onboundary = (e) => setSpoken(e.charIndex + (e.charLength || 0));
       u.onend = () => { setSpoken(text.length); then(); };

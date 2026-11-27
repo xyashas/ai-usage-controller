@@ -223,6 +223,16 @@ pub fn transcribe_wav(wav_path: &Path, on_status: &dyn Fn(&str)) -> Result<Strin
     let no_ts = loaded.tokenizer.token_to_id(m::NO_TIMESTAMPS_TOKEN).unwrap_or(50362);
     let eot = loaded.tokenizer.token_to_id(m::EOT_TOKEN).unwrap_or(50256);
 
+    let vocab_size = loaded.config.vocab_size;
+    let mut suppress_mask = vec![0.0f32; vocab_size];
+    for &tok in &loaded.config.suppress_tokens {
+        if (tok as usize) < vocab_size {
+            suppress_mask[tok as usize] = f32::NEG_INFINITY;
+        }
+    }
+    let suppress = Tensor::from_vec(suppress_mask, vocab_size, &device)
+        .map_err(|e| format!("Suppress tensor error: {e}"))?;
+
     let mut tokens = vec![sot, no_ts];
     let max_tokens = 224usize;
     for i in 0..max_tokens {
@@ -249,7 +259,8 @@ pub fn transcribe_wav(wav_path: &Path, on_status: &dyn Fn(&str)) -> Result<Strin
             .map_err(|e| format!("Linear error: {e}"))?
             .i(0)
             .and_then(|t| t.i(0))
-            .map_err(|e| format!("Logits index error: {e}"))?;
+            .and_then(|t| t.broadcast_add(&suppress))
+            .map_err(|e| format!("Logits error: {e}"))?;
         let next = logits
             .argmax(0)
             .and_then(|t| t.to_scalar::<u32>())

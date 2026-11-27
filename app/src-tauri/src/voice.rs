@@ -69,6 +69,8 @@ fn start_cpal_capture() -> Result<MicCapture, String> {
         writer: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>>,
         phase: f64,
         step: f64,
+        acc: f32,
+        acc_n: u32,
         samples_written: u64,
         peak: f32,
     }
@@ -76,6 +78,8 @@ fn start_cpal_capture() -> Result<MicCapture, String> {
         writer: Some(writer),
         phase: 0.0,
         step: 16_000.0 / (in_rate.max(1) as f64),
+        acc: 0.0,
+        acc_n: 0,
         samples_written: 0,
         peak: 0.0,
     }));
@@ -88,6 +92,8 @@ fn start_cpal_capture() -> Result<MicCapture, String> {
         let Ok(mut g) = st.lock() else { return };
         let step = g.step;
         let mut phase = g.phase;
+        let mut acc = g.acc;
+        let mut acc_n = g.acc_n;
         let mut peak = g.peak;
         let mut written = 0u64;
         if let Some(w) = g.writer.as_mut() {
@@ -96,16 +102,25 @@ fn start_cpal_capture() -> Result<MicCapture, String> {
                 if a > peak {
                     peak = a;
                 }
+                acc += s;
+                acc_n += 1;
                 phase += step;
-                while phase >= 1.0 {
-                    phase -= 1.0;
-                    let i = (s.clamp(-1.0, 1.0) * 32767.0) as i16;
-                    let _ = w.write_sample(i);
-                    written += 1;
+                if phase >= 1.0 {
+                    let avg = acc / (acc_n.max(1) as f32);
+                    acc = 0.0;
+                    acc_n = 0;
+                    while phase >= 1.0 {
+                        phase -= 1.0;
+                        let i = (avg.clamp(-1.0, 1.0) * 32767.0) as i16;
+                        let _ = w.write_sample(i);
+                        written += 1;
+                    }
                 }
             }
         }
         g.phase = phase;
+        g.acc = acc;
+        g.acc_n = acc_n;
         g.peak = peak;
         g.samples_written += written;
     };
@@ -398,28 +413,32 @@ pub fn start(live: impl Fn(String) + Send + Sync + 'static) -> Result<Listening,
                 (wav, samples, peak)
             });
 
+            // Prefer local Whisper on the full cpal recording whenever real audio was captured
+            // (WinRT often commits only a 1-word partial like "What" when you let go mid-sentence).
+            if let Some((wav, samples, peak)) = cpal_result {
+                let res = if samples >= 4_000 && peak >= 0.002 {
+                    crate::ask::diag("voice: transcribing full cpal clip with local whisper tiny.en");
+                    match crate::whisper_local::transcribe_wav(&wav, on_status) {
+                        Ok(w) if !w.trim().is_empty() => Ok(w),
+                        Ok(_) if !winrt_said.is_empty() => Ok(winrt_said),
+                        Err(_) if !winrt_said.is_empty() => Ok(winrt_said),
+                        other => other,
+                    }
+                } else if !winrt_said.is_empty() {
+                    Ok(winrt_said)
+                } else {
+                    Err(format!(
+                        "Your microphone was silent (peak {:.3}). Check that it isn't muted and is the default input in Settings → System → Sound.",
+                        peak
+                    ))
+                };
+                let _ = std::fs::remove_file(&wav);
+                return res;
+            }
             if !winrt_said.is_empty() {
-                if let Some((wav, _, _)) = cpal_result {
-                    let _ = std::fs::remove_file(wav);
-                }
                 return Ok(winrt_said);
             }
-
-            // WinRT returned empty (0 guesses/phrases or unavailable): fall back to local Whisper!
-            let Some((wav, samples, peak)) = cpal_result else {
-                return Err("I couldn't hear anything. Check Settings → Privacy & security → Microphone and Settings → System → Sound.".into());
-            };
-            let res = if samples < 1_600 || peak < 0.002 {
-                Err(format!(
-                    "Your microphone was silent (peak {:.3}). Check that it isn't muted and is the default input in Settings → System → Sound.",
-                    peak
-                ))
-            } else {
-                crate::ask::diag("voice fallback: running local whisper tiny.en");
-                crate::whisper_local::transcribe_wav(&wav, on_status)
-            };
-            let _ = std::fs::remove_file(&wav);
-            res
+            Err("I couldn't hear anything. Check Settings → Privacy & security → Microphone and Settings → System → Sound.".into())
         }),
     })
 }
