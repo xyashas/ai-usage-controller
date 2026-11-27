@@ -1,3 +1,4 @@
+mod autosend;
 mod claude_web;
 mod dispatch;
 mod hover;
@@ -121,10 +122,12 @@ fn test_handoff_offers(state: State<AppState>) -> CmdResult<Vec<aiuc_core::snaps
 async fn launch_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>, id: u64, prompt: String, dest: handoff::Dest) -> CmdResult<String> {
     if window.label() != "widget" { return Err("Open the widget to launch a handoff.".into()); }
     let pending = state.handoff.clone();
+    let engine = state.engine.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut guard = pending.lock().map_err(err)?;
         let draft = guard.as_ref().filter(|d| d.id == id).ok_or("Preview this session again.")?;
-        let msg = handoff::launch(draft.cwd.as_deref(), draft.target, dest, &prompt)?;
+        let auto = engine.lock().map_err(err)?.settings.auto_send;
+        let msg = handoff::launch(draft.cwd.as_deref(), draft.target, dest, &prompt, auto)?;
         *guard = None;
         Ok(msg)
     }).await.map_err(err)?

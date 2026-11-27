@@ -4,7 +4,7 @@
 
 use aiuc_core::{handoff, model::Tool};
 use serde::{Deserialize, Serialize};
-use std::{io::Write, path::{Path, PathBuf}, process::{Command, Stdio}};
+use std::{io::Write, path::{Path, PathBuf}, process::{Command, Stdio}, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -208,36 +208,59 @@ end run"#;
     Ok(started)
 }
 
+/// After opening an app or page: paste and send the prompt when its window is
+/// in front. Returns what to tell the user, and whether it was sent.
+fn auto_deliver(target: Tool, dest: Dest, opened_label: &str) -> (String, bool) {
+    use crate::autosend::{paste_into, Outcome};
+    let name = crate::tool_name(target);
+    let chatgpt = dest == Dest::App && opened_label == "ChatGPT app";
+    let keywords: &[&str] = match target {
+        Tool::ClaudeCode => &["claude"],
+        Tool::Codex if chatgpt => &["chatgpt"],
+        Tool::Codex => &["codex", "chatgpt"],
+        Tool::Gemini => &["gemini"],
+    };
+    let (timeout, settle) = if dest == Dest::Web { (Duration::from_secs(20), Duration::from_millis(3000)) } else { (Duration::from_secs(15), Duration::from_millis(1800)) };
+    // The ChatGPT app opens on a normal chat, not Codex, so paste but don't send.
+    match paste_into(keywords, !chatgpt, timeout, settle) {
+        Outcome::Sent => (format!("Sent to {name} in the {opened_label}"), true),
+        Outcome::Pasted => ("Pasted into the ChatGPT app. Switch to Codex in its sidebar if it isn't open, then press Enter".into(), true),
+        Outcome::NotFound => (format!("Copied. The {opened_label} didn't come to the front, so paste it there yourself"), false),
+    }
+}
+
 /// Start a dispatcher task: in a terminal with the task as the first message,
-/// or copied to the clipboard with the app or web page opened to paste it into.
-pub fn start_task(cwd: Option<&Path>, target: Tool, dest: Dest, prompt: &str) -> Result<String, String> {
+/// or in the app or web page, where it's pasted and sent when `auto` is on
+/// (otherwise left on the clipboard). Returns a line for the user and whether
+/// the task reached the tool.
+pub fn start_task(cwd: Option<&Path>, target: Tool, dest: Dest, prompt: &str, auto: bool) -> Result<(String, bool), String> {
     let name = crate::tool_name(target);
     match dest {
         Dest::Terminal => {
             let dir = cwd.ok_or("Clone this repo to run it in a terminal.")?;
             if !open_terminal(dir, target, prompt)? { return Err("No terminal opened.".into()); }
-            Ok(format!("{name} started in a terminal"))
+            Ok((format!("{name} started in a terminal"), true))
         }
-        Dest::App => {
+        Dest::App | Dest::Web => {
             copy_to_clipboard(prompt)?;
-            if !open_app(target) {
-                tauri_plugin_opener::open_url(web_url(target), None::<&str>).map_err(|e| e.to_string())?;
-                return Ok(format!("Copied. The app didn't open, so {name} on the web did: paste it there"));
-            }
-            Ok(format!("Copied. Paste it into a new {name} session in the {}", app_label(target)))
-        }
-        Dest::Web => {
-            copy_to_clipboard(prompt)?;
-            tauri_plugin_opener::open_url(web_url(target), None::<&str>).map_err(|e| e.to_string())?;
-            Ok(format!("Copied. Paste it into {name} on the web"))
+            let label = open_dest(target, dest)?;
+            if auto { return Ok(auto_deliver(target, dest, &label)); }
+            Ok((format!("Copied. Paste it into {name} in the {label}"), false))
         }
     }
+}
+
+/// Open the app (falling back to the web) or the web page. Returns what opened.
+fn open_dest(target: Tool, dest: Dest) -> Result<String, String> {
+    if dest == Dest::App && open_app(target) { return Ok(app_label(target).into()); }
+    tauri_plugin_opener::open_url(web_url(target), None::<&str>).map_err(|e| e.to_string())?;
+    Ok("browser".into())
 }
 
 /// Hand the prompt to `target`. `cwd` is the project folder on this computer
 /// (absent for a repo that's only in the cloud). Returns a short line for the
 /// user saying what happened.
-pub fn launch(cwd: Option<&Path>, target: Tool, dest: Dest, prompt: &str) -> Result<String, String> {
+pub fn launch(cwd: Option<&Path>, target: Tool, dest: Dest, prompt: &str, auto: bool) -> Result<String, String> {
     let name = crate::tool_name(target);
     // Local tools read the file; web and app sessions get the pasted prompt.
     if let Some(dir) = cwd {
@@ -252,16 +275,10 @@ pub fn launch(cwd: Option<&Path>, target: Tool, dest: Dest, prompt: &str) -> Res
             }
             Ok(format!("{name} is starting in a terminal."))
         }
-        Dest::App => {
-            if !open_app(target) {
-                tauri_plugin_opener::open_url(web_url(target), None::<&str>).map_err(|e| e.to_string())?;
-                return Ok(format!("The {} didn't open, so the web app did. Paste the prompt there.", app_label(target)));
-            }
-            Ok(format!("Prompt copied. Paste it into {name} in the {}.", app_label(target)))
-        }
-        Dest::Web => {
-            tauri_plugin_opener::open_url(web_url(target), None::<&str>).map_err(|e| e.to_string())?;
-            Ok(format!("Prompt copied. Pick the repo in {name} on the web and paste it."))
+        Dest::App | Dest::Web => {
+            let label = open_dest(target, dest)?;
+            if auto { return Ok(auto_deliver(target, dest, &label).0 + "."); }
+            Ok(format!("Prompt copied. Paste it into {name} in the {label}."))
         }
     }
 }

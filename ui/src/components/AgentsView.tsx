@@ -144,8 +144,17 @@ export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: 
       const pasted = items.filter((t) => t.dest.dest !== "terminal");
       const first = [...terminal, ...pasted.slice(0, 1)];
       const started = await send(repo, first, useWorktrees);
-      setQueue(pasted.length > 1 ? { repo, tasks: pasted.slice(1) } : null);
       if (started.some((s) => !s.error)) { setText(""); setPlan(null); setWorktrees(null); }
+      // With auto-send on, each app/web task goes as soon as the one before
+      // was pasted in. If one couldn't be, stop and let you continue by hand.
+      let rest = pasted.slice(1);
+      let ok = started[started.length - 1]?.delivered ?? false;
+      while (ok && rest.length) {
+        const [s] = await send(repo, rest.slice(0, 1), useWorktrees);
+        ok = !!s?.delivered;
+        rest = rest.slice(1);
+      }
+      setQueue(rest.length ? { repo, tasks: rest } : null);
     } catch (e) { setErr(String(e)); }
     finally { setBusy(false); }
   }
@@ -216,7 +225,7 @@ export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: 
             Worktrees
           </button>}
           <button disabled={!runnable || busy} onClick={run} className="btn btn-primary ml-auto !py-1.5">
-            {busy ? "Starting…" : tasks.length > 1 ? `Run ${tasks.length} tasks` : "Run"}
+            {busy ? "Sending…" : tasks.length > 1 ? `Run ${tasks.length} tasks` : "Run"}
             <span className="text-[10.5px] font-medium opacity-50">{mac ? "⌘↵" : "Ctrl↵"}</span>
           </button>
         </div>
@@ -256,11 +265,12 @@ export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: 
           })}
           <p className="px-1 pt-0.5 text-[11px] text-mute">
             {!local
-              ? `Runs in the cloud on ${current?.name}. Each task is copied for you to paste into a new session.`
+              ? `Runs in the cloud on ${current?.name}.`
               : useWorktrees
               ? `Each task gets its own branch from ${current?.current_branch || "the current commit"}, in ${current?.root.split(/[\\/]/).pop() || "the repo"}.agents/ next to the repo. Uncommitted changes stay where they are.`
               : `Runs in ${current?.name || "the repo"} on ${current?.current_branch || "the current branch"}.`}
-            {local && " Terminal tasks start together; app and web tasks are copied one at a time for you to paste."}
+            {local && " Terminal tasks start together; app and web tasks are sent one after another."}
+            {tasks.some((t) => t.dest && t.dest.dest !== "terminal") && " Keep your hands off the keyboard for a few seconds while they're sent."}
           </p>
         </section>
       )}

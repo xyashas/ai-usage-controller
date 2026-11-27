@@ -71,6 +71,9 @@ pub struct Settings {
     /// Repositories the user added for handoffs, besides the ones found from
     /// recent sessions. Local only.
     pub repos: Vec<PathBuf>,
+    /// After opening an app or web page for a task or handoff, paste the prompt
+    /// and press Enter once that window is in front.
+    pub auto_send: bool,
 }
 
 impl Default for Settings {
@@ -92,6 +95,7 @@ impl Default for Settings {
             claude_web: false,
             api_base: "https://api.aiusage.dev".into(),
             repos: vec![],
+            auto_send: true,
         }
     }
 }

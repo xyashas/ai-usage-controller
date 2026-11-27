@@ -16,9 +16,9 @@ const action: Record<Dest, (t: Tool, label: string) => string> = {
 };
 
 const hint: Record<Dest, string> = {
-  app: "Copies the handoff and opens the app. Paste it into a new session there.",
+  app: "Opens the app and sends the handoff there (it's also on your clipboard).",
   terminal: "Saves .aiuc-handoff.md in the project (hidden from git) and starts the CLI there, already reading it.",
-  web: "Copies the handoff and opens the web app. Cloud sessions see what's pushed to GitHub, so push your branch first.",
+  web: "Opens the web app and sends the handoff (also on your clipboard). Cloud sessions see what's pushed to GitHub, so push your branch first.",
 };
 
 export function HandoffPreview({ draft, onBack }: { draft: Draft; onBack: () => void }) {

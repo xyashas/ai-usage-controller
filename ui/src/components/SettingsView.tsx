@@ -75,6 +75,14 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         <button onClick={onSetup} className="text-left text-[12px] text-fg underline-offset-2 hover:underline">Check setup and test the numbers →</button>
       </Section>
 
+      <Section title="Agents">
+        <Toggle label="Paste and send tasks automatically" on={s.auto_send} set={(v) => update({ ...s, auto_send: v })} />
+        <p className="text-[11px] leading-relaxed text-muted">
+          When a task or handoff opens in an app or the web, the widget pastes it and presses Enter once that window is in front. It never types into any other window.
+          {navigator.userAgent.includes("Mac") ? " On a Mac, allow AI Usage Controller under System Settings → Privacy & Security → Accessibility." : ""}
+        </p>
+      </Section>
+
       <Section title="Tools & plans">
         {TOOLS.map(({ tool: t, label }) => (
           <div key={t} className="flex items-center gap-2">

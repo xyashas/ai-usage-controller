@@ -277,6 +277,15 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    `github:owner/name` (cloud tasks via web/app; Clone button clones with the token
    and resets the remote to the plain URL). Task rows store `dest`; app/web tasks
    show "Opened" until local logs show activity.
+1f. **Auto paste and send** (`app/src-tauri/src/autosend.rs`, setting `auto_send`,
+   default on). After opening an app/web page, wait (15 s app / 20 s web) for the
+   foreground window whose title or app name contains the tool's keyword (claude /
+   codex|chatgpt / gemini; never our own window), let it settle (1.8 s / 3 s),
+   re-check, then Ctrl/Cmd+V and Enter (Windows `keybd_event`, macOS System Events,
+   which needs Accessibility permission). The ChatGPT app gets paste only (it opens
+   on a normal chat, not Codex). If the window never shows, nothing is typed and
+   the prompt stays on the clipboard. The dispatcher sends app/web tasks one after
+   another while each is delivered; it stops and offers "Copy & open next" otherwise.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).

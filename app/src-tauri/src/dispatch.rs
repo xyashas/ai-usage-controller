@@ -80,8 +80,10 @@ pub struct Started {
     pub tool: Tool,
     pub dest: handoff::Dest,
     pub branch: Option<String>,
-    /// What happened, e.g. "Copied. Paste it into Codex in the ChatGPT app".
+    /// What happened, e.g. "Sent to Codex in the browser".
     pub message: Option<String>,
+    /// The task reached the tool (started, or pasted in), so the next one can go.
+    pub delivered: bool,
     pub error: Option<String>,
 }
 
@@ -95,6 +97,9 @@ fn pasted_prompt(repo_name: &str, folder: Option<&std::path::Path>, branch: Opti
     }
 }
 
+/// (branch, (message, delivered), folder or repo name)
+type Launched = (Option<String>, (String, bool), String);
+
 #[tauri::command]
 pub async fn run_dispatch(window: tauri::WebviewWindow, state: State<'_, AppState>, repo: String, tasks: Vec<RunTask>, worktrees: bool) -> CmdResult<Vec<Started>> {
     if window.label() != "widget" { return Err("Open the widget to run tasks.".into()); }
@@ -106,11 +111,12 @@ pub async fn run_dispatch(window: tauri::WebviewWindow, state: State<'_, AppStat
             Repo::Local(root) => (Some(root.clone()), rh::status(root).name),
             Repo::GitHub(name) => (None, name.clone()),
         };
+        let auto = engine.lock().map_err(err)?.settings.auto_send;
         let mut out = Vec::new();
         for t in tasks {
             let text = t.text.trim().to_string();
             if text.is_empty() { continue; }
-            let started = (|| -> Result<(Option<String>, String, String), String> {
+            let started = (|| -> Result<Launched, String> {
                 // Local tasks get a worktree when asked; web tasks run in the cloud.
                 let (cwd, branch) = match (&root, t.dest) {
                     (Some(root), handoff::Dest::Terminal | handoff::Dest::App) if worktrees => {
@@ -124,19 +130,19 @@ pub async fn run_dispatch(window: tauri::WebviewWindow, state: State<'_, AppStat
                     let folder = if t.dest == handoff::Dest::App { cwd.as_deref() } else { None };
                     pasted_prompt(&repo_name, folder, branch.as_deref(), &text)
                 };
-                let message = handoff::start_task(cwd.as_deref(), t.tool, t.dest, &prompt)?;
+                let message = handoff::start_task(cwd.as_deref(), t.tool, t.dest, &prompt, auto)?;
                 let where_ = cwd.as_ref().map(|c| c.to_string_lossy().into_owned()).unwrap_or_else(|| repo_name.clone());
                 Ok((branch, message, where_))
             })();
             match started {
-                Ok((branch, message, cwd)) => {
+                Ok((branch, (message, delivered), cwd)) => {
                     let dest = serde_json::to_value(t.dest).ok().and_then(|v| v.as_str().map(str::to_owned));
                     let repo_field = root.as_ref().map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|| repo_name.clone());
                     let row = TaskRow { id: 0, created_at: Utc::now(), repo: repo_field, cwd, branch: branch.clone(), tool: t.tool, text: text.clone(), dest };
                     engine.lock().map_err(err)?.record_task(&row).map_err(err)?;
-                    out.push(Started { text, tool: t.tool, dest: t.dest, branch, message: Some(message), error: None });
+                    out.push(Started { text, tool: t.tool, dest: t.dest, branch, message: Some(message), delivered, error: None });
                 }
-                Err(e) => out.push(Started { text, tool: t.tool, dest: t.dest, branch: None, message: None, error: Some(e) }),
+                Err(e) => out.push(Started { text, tool: t.tool, dest: t.dest, branch: None, message: None, delivered: false, error: Some(e) }),
             }
         }
         Ok(out)

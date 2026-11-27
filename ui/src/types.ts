@@ -96,6 +96,7 @@ export interface Settings {
   live_gauges: boolean;
   claude_web: boolean;
   api_base: string;
+  auto_send: boolean;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
 export type Mode = "collapsed" | "expanded";
@@ -135,6 +136,6 @@ export interface AgentRun { id: number; tool: Tool; text: string; repo_name: str
 export interface Routed { text: string; tool: Tool | null; explicit: boolean; reason: string }
 export interface ToolRoom { tool: Tool; ready: boolean; used_pct: number | null; active: boolean }
 export interface DispatchPlan { tasks: Routed[]; rooms: ToolRoom[]; dests: Record<Tool, DestOption[]> }
-export interface Started { text: string; tool: Tool; dest: Dest; branch: string | null; message: string | null; error: string | null }
+export interface Started { text: string; tool: Tool; dest: Dest; branch: string | null; message: string | null; delivered: boolean; error: string | null }
 export interface GithubStatus { login: string | null; cli: boolean; device_flow: boolean }
 export interface DeviceCode { device_code: string; user_code: string; verification_uri: string; interval: number }

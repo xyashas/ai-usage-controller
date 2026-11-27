@@ -111,6 +111,7 @@ let mockSettings: Settings = {
   live_gauges: true,
   claude_web: mockScenario === "connected",
   api_base: "https://api.aiusage.dev",
+  auto_send: true,
 };
 const dismissed = new Set<string>();
 let mockGithub: string | null = null;
@@ -241,7 +242,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       const app = (label: string) => [{ dest: "app", label }, ...(local ? [{ dest: "terminal", label: "Terminal" }] : []), { dest: "web", label: "Web" }];
       return { tasks, rooms, dests: { claude_code: app("Claude app"), codex: app("ChatGPT app"), gemini: [...(local ? [{ dest: "terminal", label: "Terminal" }] : []), { dest: "web", label: "Web" }] } };
     }
-    case "run_dispatch": return (args!.tasks as { text: string; tool: Tool; dest: Dest }[]).map((t) => ({ ...t, branch: args!.worktrees && t.dest !== "web" ? "agents/x" : null, message: t.dest === "terminal" ? "Started in a terminal" : t.dest === "app" ? "Copied. Paste it into a new session in the app" : "Copied. Paste it on the web", error: null }));
+    case "run_dispatch": return (args!.tasks as { text: string; tool: Tool; dest: Dest }[]).map((t) => ({ ...t, branch: args!.worktrees && t.dest !== "web" ? "agents/x" : null, message: t.dest === "terminal" ? "Started in a terminal" : t.dest === "app" ? "Sent in the app" : "Sent in the browser", delivered: true, error: null }));
     case "github_status": return { login: mockGithub, cli: !mockGithub, device_flow: true };
     case "github_connect": mockGithub = "you"; return "you";
     case "github_device_start": return { device_code: "d", user_code: "WDJB-MJHT", verification_uri: "https://github.com/login/device", interval: 5 };
