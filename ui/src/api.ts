@@ -396,7 +396,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       };
     }
     case "preview_repo_handoff": return {
-      id: 1, place: cmd === "preview_handoff" ? "acme-api" : "acme/web · claude/fix-login",
+      id: 1, place: "acme/web · claude/fix-login",
       prompt: "# Session handoff\n\n## Original goal\nFix the checkout flow so coupons apply before tax.\n\n## Files created or edited\n- src/checkout/total.ts\n- src/checkout/total.test.ts\n\n## TODO\n- [ ] Run the checkout tests\n- [ ] Update the changelog",
       destinations: (args!.target as Tool) === "gemini" ? [{ dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }] : [{ dest: "app", label: (args!.target as Tool) === "codex" ? "Codex app" : "Claude app" }, { dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }],
     };

@@ -321,7 +321,7 @@ export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
             )}
           </div>
         </>
-      ) : <GithubConnect onChanged={() => load(false)} />)}
+      ) : <GithubConnect onChange={() => load(false)} />)}
       {err && <p className="px-1 text-[11.5px] text-bad">{err}</p>}
     </div>
   );
