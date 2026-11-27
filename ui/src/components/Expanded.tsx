@@ -1,4 +1,5 @@
-import type { Snapshot, ToolStatus, WindowStatus } from "../types";
+import { toolName } from "./HandoffPreview";
+import type { HandoffOffer, Tool, Snapshot, ToolStatus, WindowStatus } from "../types";
 import type { View } from "../App";
 import { UsageBar } from "./UsageBar";
 import { ToolMark } from "./ToolMark";
@@ -113,7 +114,7 @@ function ToolRow({ t, onPaywall }: { t: ToolStatus; onPaywall: () => void }) {
   );
 }
 
-export function Expanded({ snap, onView, refresh }: { snap: Snapshot; onView: (v: View) => void; refresh: () => void }) {
+export function Expanded({ snap, onView, refresh, onHandoff }: { onHandoff: (offer: HandoffOffer, target: Tool) => void; snap: Snapshot; onView: (v: View) => void; refresh: () => void }) {
   const paid = snap.entitlements.tier !== "free";
   const active = snap.tools.find((t) => t.tool === snap.active_tool && t.enabled && t.detected) ?? snap.tools.find((t) => t.detected && t.enabled);
   const others = snap.tools.filter((t) => t !== active && t.detected && t.enabled);
@@ -121,6 +122,18 @@ export function Expanded({ snap, onView, refresh }: { snap: Snapshot; onView: (v
   const auditItem = snap.audit.find((a) => a.action === "downgrade" || a.action === "cancel" || a.action === "upgrade");
   const meter = snap.session_meter;
   const hasActivity = meter != null || snap.today.cost_usd > 0.004;
+
+  const alert = snap.alerts[0];
+  const redSource = alert?.kind === "low_headroom" && alert.level === "red" ? alert.tool : null;
+  function actions(offer: HandoffOffer) {
+    if (!offer.targets.length) return null;
+    return <div key={offer.source} className="flex w-full flex-wrap gap-2" role="group" aria-label={`Handoff from ${toolName[offer.source]}`}>
+      {offer.source !== active?.tool && <span className="w-full text-xs text-muted">From {toolName[offer.source]}</span>}
+      {offer.targets.map(target => <button key={target} className="grow rounded-full bg-fg px-2 py-2 text-xs font-semibold text-canvas"
+        onClick={() => onHandoff(offer, target)}>Continue in {toolName[target]}</button>)}
+    </div>;
+  }
+  const alertOffer = snap.handoffs.find(o => o.source === redSource && o.targets.length);
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -133,7 +146,8 @@ export function Expanded({ snap, onView, refresh }: { snap: Snapshot; onView: (v
       {claude?.live_note && claude !== active && !claude.reconnect && <p className="text-xs text-muted">Claude · {claude.live_note}</p>}
       {active && claude && (claude.reconnect || (claude.needs_connect && !claude.live_note)) && <ClaudeConnect tool={claude} onChanged={refresh} />}
 
-      {snap.alerts[0] && <AlertBar alert={snap.alerts[0]} onDone={refresh} />}
+      {alert && <AlertBar alert={alert} onDone={refresh} actions={alertOffer && actions(alertOffer)} />}
+      {snap.handoffs.filter(o => o !== alertOffer).map(actions)}
 
       {others.length > 0 && (
         <section className="-mx-2 border-t border-fg/[0.06] pt-2">

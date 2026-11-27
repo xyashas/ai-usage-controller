@@ -609,6 +609,7 @@ impl Engine {
         let savings: f64 = self.store.savings_since(metrics::month_start_local(now))?.iter().map(|s| s.amount_usd).sum();
 
         let mut snap = Snapshot {
+            handoffs: vec![],
             gauge_history: vec![],
             idle_hidden: self.settings.onboarded && self.settings.hide_when_idle
                 && !recent_by_tool.values().flatten().any(|e| e.ts > now - Duration::minutes(30))
@@ -651,6 +652,17 @@ impl Engine {
                     }
                     snap.gauge_history.push(point);
                 }
+            }
+        }
+        for t in snap.tools.iter().filter(|t| t.enabled && !t.locked && t.tool != Tool::Gemini) {
+            let near_limit = t.windows.iter().any(|w| matches!(w.key.as_str(), "five_hour" | "weekly")
+                && w.source != Source::Learning && w.headroom_pct <= 10.0);
+            let red = snap.alerts.iter().any(|a| a.tool == t.tool && a.kind == "low_headroom" && a.level == "red");
+            if !near_limit && !red { continue; }
+            if let Some(event) = recent_by_tool[&t.tool].iter().rev()
+                .find(|e| e.ts <= now && e.ts >= now - Duration::hours(2)) {
+                let targets = Tool::ALL.into_iter().filter(|other| *other != t.tool && crate::handoff::cli(*other).is_some()).collect();
+                snap.handoffs.push(crate::snapshot::HandoffOffer { source: t.tool, session: event.session_id.clone(), targets });
             }
         }
         Ok(snap)

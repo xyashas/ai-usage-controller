@@ -633,3 +633,59 @@ fn history_tracks_only_the_binding_window_inside_the_last_day() {
     approx(history[1].used, 25.0);
     assert_eq!(history[0].reset_at, Some((now - Duration::hours(1)).timestamp_millis()));
 }
+
+#[test]
+fn handoff_summarizes_claude_and_codex_fixture_logs_locally() {
+    for (source, fixture, filename) in [
+        (Tool::ClaudeCode, "claude.jsonl", "selected.jsonl"),
+        (Tool::Codex, "codex.jsonl", "rollout-2026-11-27-selected.jsonl"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let log_dir = dir.path().join("logs");
+        std::fs::create_dir(&log_dir).unwrap();
+        let contents = std::fs::read_to_string(fixtures("handoff").join(fixture)).unwrap()
+            .replace("\"PROJECT_FOLDER\"", &serde_json::to_string(dir.path()).unwrap());
+        std::fs::write(log_dir.join(filename), contents).unwrap();
+        let (cwd, prompt) = aiuc_core::handoff::prepare(&[log_dir], source, "selected").unwrap();
+        assert_eq!(cwd, dir.path());
+        assert!(!cwd.join(".aiuc-handoff.md").exists(), "preview is read-only");
+        for expected in ["Fix the checkout flow.", "Keep the retry limit.", "cart.rs", "Checkout test failed.",
+            "Implemented retry handling.", "- [ ] Run integration tests."] {
+            assert!(prompt.contains(expected), "{source:?} missing {expected}");
+        }
+        for excluded in ["PRIVATE_BODY", "private side thread", "read-only.txt", "Obsolete task"] {
+            assert!(!prompt.contains(excluded));
+        }
+        assert!(prompt.split_whitespace().count() < 1500);
+    }
+}
+
+#[test]
+fn handoff_saves_edits_and_updates_existing_ignore_file_once() {
+    use aiuc_core::handoff::{save, FILENAME};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    save(path, "first draft").unwrap();
+    assert!(!path.join(".gitignore").exists());
+    std::fs::write(path.join(".gitignore"), "build/\r\nlogs/").unwrap();
+    save(path, "edited local prompt").unwrap();
+    save(path, "edited local prompt").unwrap();
+    assert_eq!(std::fs::read_to_string(path.join(".gitignore")).unwrap(), "build/\r\nlogs/\r\n/.aiuc-handoff.md\r\n");
+    assert!(save(path, &"word ".repeat(1500)).is_err());
+    assert_eq!(std::fs::read_to_string(path.join(FILENAME)).unwrap(), "edited local prompt");
+}
+
+#[test]
+fn handoff_eligibility_covers_both_sources_and_expires_after_cutoff() {
+    let now = t("2026-11-26T12:00:00Z");
+    for source in [Tool::ClaudeCode, Tool::Codex] {
+        for (used, age, eligible) in [(89.9, 0, false), (90.0, 120, true), (100.0, 121, false)] {
+            let mut gauge = codex_gauge(now, used, now + Duration::hours(3));
+            gauge.tool = source;
+            let mut eng = engine_with(vec![ev(source, EventKind::Assistant, now - Duration::minutes(age), "s", 0.1)], vec![gauge]);
+            eng.settings.primary_tool = Some(source);
+            let snap = eng.snapshot(now).unwrap();
+            assert_eq!(snap.handoffs.iter().any(|h| h.source == source && h.session == "s"), eligible);
+        }
+    }
+}

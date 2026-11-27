@@ -20,6 +20,23 @@ A Mac and Windows widget that shows how much AI runway you have left, warns you 
 └──────────────────────────────────────────────┘
 ```
 
+## Continue a session in another CLI
+
+At 90% usage of a five-hour or weekly limit, the panel offers installed destinations
+for your most recent Claude Code or Codex session. The action also appears on a red
+low-limit alert and stays available for two hours after the last session activity.
+
+Choose **Continue in Codex**, **Continue in Claude Code**, or **Continue in Gemini**
+to preview and edit a summary of the goal, latest requests, edits, errors, progress,
+and TODOs. Confirming saves the edited prompt as `.aiuc-handoff.md` in the session's
+project folder, adds it to an existing `.gitignore`, and copies it to the clipboard.
+The widget opens the chosen CLI in that folder with an instruction to read the file.
+Windows uses Windows Terminal when available and PowerShell as a fallback. macOS
+uses Terminal.app. The destination CLI must be on the widget's PATH.
+
+The widget prepares the handoff locally. It sends no transcript or prompt to its API.
+Once started, the destination CLI uses its own account and network settings.
+
 ## What's in v1
 
 | # | Feature | Plan | Where |

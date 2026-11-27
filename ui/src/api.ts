@@ -13,6 +13,8 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const api = {
+  previewHandoff: (source: Tool, session: string, target: Tool) => call<{ id: number; prompt: string }>("preview_handoff", { source, session, target }),
+  launchHandoff: (id: number, prompt: string) => call<void>("launch_handoff", { id, prompt }),
   snapshot: () => call<Snapshot>("get_snapshot"),
   settings: () => call<Settings>("get_settings"),
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
@@ -136,6 +138,7 @@ function mockSnapshot(): Snapshot {
   if (claudeLeft <= 20)
     alerts.push({ id: `low:${claudeLeft <= 5 ? "red" : "amber"}`, level: claudeLeft <= 5 ? "red" : "amber", kind: "low_headroom", tool: "claude_code", message: `Claude 5-hour limit ${Math.round(100 - claudeLeft)}% used, about 20 min left at this pace`, action: paid ? { kind: "switch", label: "Switch to Codex", target_tool: "codex" } : { kind: "dismiss", label: "Dismiss", target_tool: null }, session_id: null, project: null, burn_usd_per_min: null });
   return {
+    handoffs: mockScenario === "critical" ? [{ source: "claude_code", session: "s", targets: ["codex", "gemini"] }] : [],
     gauge_history: ["empty", "learning", "unconnected"].includes(mockScenario) ? [] : Array.from({length: 97}, (_, i) => ({
       at: stamp - (96 - i) * 900000, used: i === 96 ? 100 - claudeLeft : (i % 20) * 4,
       reset_at: stamp + (Math.floor(i / 20) * 20 + 20 - 96) * 900000,
@@ -181,6 +184,7 @@ const mockPlans: Record<Tool, Plan[]> = {
 
 function mock(cmd: string, args?: Record<string, unknown>): unknown {
   switch (cmd) {
+    case "preview_handoff": return { id: 1, prompt: "# Session handoff\n\n## Original goal\nFix checkout.\n\n## TODO\n- [ ] Run checkout tests." };
     case "get_snapshot": return mockSnapshot();
     case "get_settings": return structuredClone(mockSettings);
     case "save_settings": mockSettings = args!.settings as Settings; return null;

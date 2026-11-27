@@ -1,5 +1,6 @@
 mod claude_web;
 mod hover;
+mod handoff;
 mod window;
 
 use aiuc_core::model::Tool;
@@ -25,7 +26,14 @@ const SYNC_EVERY: Duration = Duration::from_secs(60);
 const TABLES_EVERY: Duration = Duration::from_secs(6 * 3600);
 static CLAUDE_CODE_LOGIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+struct PendingHandoff {
+    id: u64,
+    cwd: std::path::PathBuf,
+    target: Tool,
+}
+
 struct AppState {
+    handoff: Arc<Mutex<Option<PendingHandoff>>>,
     engine: Arc<Mutex<Engine>>,
     last: Arc<Mutex<Option<Snapshot>>>,
     hit: Arc<Mutex<window::Rect>>,
@@ -49,6 +57,47 @@ fn snapshot_now(state: &AppState) -> CmdResult<Snapshot> {
 #[tauri::command]
 fn get_snapshot(state: State<AppState>) -> CmdResult<Snapshot> {
     snapshot_now(&state)
+}
+
+#[derive(Serialize)]
+struct Preview {
+    id: u64,
+    prompt: String,
+}
+
+#[tauri::command]
+async fn preview_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>, source: Tool, session: String, target: Tool) -> CmdResult<Preview> {
+    if window.label() != "widget" { return Err("Open the widget to preview a handoff.".into()); }
+    let engine = state.engine.clone();
+    let pending = state.handoff.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let roots = {
+            let mut eng = engine.lock().map_err(err)?;
+            let snap = eng.snapshot(Utc::now()).map_err(err)?;
+            if !snap.handoffs.iter().any(|o| o.source == source && o.session == session && o.targets.contains(&target)) {
+                return Err("The session or available destination changed.".into());
+            }
+            eng.roots(source)
+        };
+        let (cwd, prompt) = aiuc_core::handoff::prepare(&roots, source, &session).map_err(err)?;
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        *pending.lock().map_err(err)? = Some(PendingHandoff { id, cwd, target });
+        Ok(Preview { id, prompt })
+    }).await.map_err(err)?
+}
+
+#[tauri::command]
+async fn launch_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>, id: u64, prompt: String) -> CmdResult<()> {
+    if window.label() != "widget" { return Err("Open the widget to launch a handoff.".into()); }
+    let pending = state.handoff.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut guard = pending.lock().map_err(err)?;
+        let draft = guard.as_ref().filter(|d| d.id == id).ok_or("Preview this session again.")?;
+        handoff::launch(&draft.cwd, draft.target, &prompt)?;
+        *guard = None;
+        Ok(())
+    }).await.map_err(err)?
 }
 
 #[tauri::command]
@@ -481,10 +530,12 @@ pub fn run() {
     }
 
     builder = builder
-        .manage(AppState { engine: engine.clone(), last: last.clone(), hit: hit.clone(), web: web.clone() })
+        .manage(AppState { handoff: Default::default(), engine: engine.clone(), last: last.clone(), hit: hit.clone(), web: web.clone() })
         .manage(web.clone())
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            preview_handoff,
+            launch_handoff,
             get_settings,
             save_settings,
             get_plans,

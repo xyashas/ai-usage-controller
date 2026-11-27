@@ -1,0 +1,6 @@
+{"type": "user", "sessionId": "selected", "cwd": "PROJECT_FOLDER", "message": {"content": "Fix the checkout flow."}}
+{"type": "assistant", "sessionId": "selected", "cwd": "PROJECT_FOLDER", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "read-only.txt"}}, {"type": "tool_use", "name": "Write", "input": {"file_path": "cart.rs", "content": "PRIVATE_BODY"}}]}}
+{"type": "user", "sessionId": "selected", "cwd": "PROJECT_FOLDER", "message": {"content": "private side thread"}, "isSidechain": true}
+{"type": "user", "sessionId": "selected", "cwd": "PROJECT_FOLDER", "message": {"content": "Keep the retry limit."}}
+{"type": "assistant", "sessionId": "selected", "cwd": "PROJECT_FOLDER", "message": {"content": [{"type": "text", "text": "Implemented retry handling."}, {"type": "tool_use", "name": "TodoWrite", "input": {"todos": [{"content": "Run integration tests.", "status": "pending"}, {"content": "Obsolete task", "status": "completed"}]}}]}}
+{"type": "user", "sessionId": "selected", "cwd": "PROJECT_FOLDER", "message": {"content": [{"type": "tool_result", "is_error": true, "content": [{"type": "text", "text": "Checkout test failed."}]}]}}

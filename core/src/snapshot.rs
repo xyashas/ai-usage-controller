@@ -109,8 +109,16 @@ pub struct GaugePoint {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct HandoffOffer {
+    pub source: Tool,
+    pub session: String,
+    pub targets: Vec<Tool>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub generated_at: DateTime<Utc>,
+    pub handoffs: Vec<HandoffOffer>,
     pub gauge_history: Vec<GaugePoint>,
     pub idle_hidden: bool,
     pub onboarded: bool,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Snapshot } from "./types";
+import { HandoffPreview, type Draft } from "./components/HandoffPreview";
+import type { HandoffOffer, Tool, Snapshot } from "./types";
 import { api, inTauri, onHover, onOpenView, onSnapshot, onToggle } from "./api";
 import { Collapsed } from "./components/Collapsed";
 import { Expanded } from "./components/Expanded";
@@ -9,7 +10,7 @@ import { SettingsView } from "./components/SettingsView";
 import { Onboarding } from "./components/Onboarding";
 import { CheckSetup } from "./components/CheckSetup";
 
-export type View = "panel" | "settings" | "paywall" | "audit" | "onboarding" | "setup";
+export type View = "panel" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
 type Platform = "macos" | "windows" | "linux";
 
 const PANEL_W = 360;
@@ -28,6 +29,7 @@ export default function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [open, setOpenState] = useState(false);
   const [mounted, setMounted] = useState(false); // panel content stays mounted while closing
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [view, setView] = useState<View>("panel");
   const [platform, setPlatform] = useState<Platform>("windows");
   const [notch, setNotch] = useState(0);
@@ -56,6 +58,7 @@ export default function App() {
         // Keep onboarding mounted so a half-finished setup isn't lost.
         if (viewRef.current !== "onboarding") setMounted(false);
         // Back to the main panel next time, unless setup isn't finished.
+        setDraft(null);
         setView((v) => (v === "onboarding" ? v : "panel"));
       }, ANIM_MS);
     }
@@ -187,6 +190,12 @@ export default function App() {
     if (v !== "panel") api.focus();
   };
 
+  function preview(offer: HandoffOffer, target: Tool) {
+    const request = api.previewHandoff(offer.source, offer.session, target);
+    setDraft({ source: offer.source, target, preview: request });
+    goto("handoff");
+  }
+
   return (
     <div className="relative h-full w-full">
       <div
@@ -212,7 +221,9 @@ export default function App() {
             style={{ width: PANEL_W, maxHeight: MAX_H, opacity: open ? 1 : 0 }}
           >
             <div ref={innerRef} style={{ paddingTop: mac ? notch : 0 }}>
-            {view === "onboarding" ? (
+            {view === "handoff" && draft ? (
+              <HandoffPreview draft={draft} onBack={() => { setDraft(null); setView("panel"); }} />
+            ) : view === "onboarding" ? (
               <Onboarding
                 onDone={async () => {
                   await refresh();
@@ -228,7 +239,7 @@ export default function App() {
             ) : view === "setup" ? (
               <CheckSetup onBack={() => setView("panel")} />
             ) : (
-              <Expanded snap={snap} onView={goto} refresh={refresh} />
+              <Expanded onHandoff={preview} snap={snap} onView={goto} refresh={refresh} />
             )}
             </div>
           </div>

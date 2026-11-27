@@ -59,7 +59,10 @@ export interface AuditResult { tool: Tool; current_plan: string; current_price: 
 
 export interface Entitlements { tier: Tier; trial_ends_at: string | null; trial_available: boolean; licence_status: string | null; max_devices: number }
 
+export interface HandoffOffer { source: Tool; session: string; targets: Tool[] }
+
 export interface Snapshot {
+  handoffs: HandoffOffer[];
   gauge_history: { at: number; used: number; reset_at: number | null }[];
   idle_hidden: boolean;
   generated_at: string;

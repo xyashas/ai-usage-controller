@@ -12,6 +12,7 @@
 
 pub mod advice;
 pub mod engine;
+pub mod handoff;
 pub mod entitlements;
 pub mod licence;
 pub mod live;
