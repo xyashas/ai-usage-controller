@@ -1,5 +1,5 @@
 import { ToolMark } from "./ToolMark";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Plan, Pref, Settings, Snapshot, Tool } from "../types";
 import { api } from "../api";
 import { BackIcon } from "./icons";
@@ -23,19 +23,26 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
     api.settings().then(setS);
     api.plans().then(setPlans);
   }, []);
+  // Changes save themselves a moment after you make them.
+  const dirty = useRef(false);
+  useEffect(() => {
+    if (!s || !dirty.current) return;
+    const t = window.setTimeout(async () => {
+      dirty.current = false;
+      setSaveError("");
+      try { await api.saveSettings(s); setSaved(true); window.setTimeout(() => setSaved(false), 1600); }
+      catch (e) { setSaveError(String(e)); }
+    }, 450);
+    return () => clearTimeout(t);
+  }, [s]);
   if (!s || !plans) return null;
 
   const update = (next: Settings) => {
+    dirty.current = true;
     setS(next);
     setSaved(false);
   };
   const tool = (t: Tool, patch: Partial<Settings["tools"][Tool]>) => update({ ...s, tools: { ...s.tools, [t]: { ...s.tools[t], ...patch } } });
-
-  async function save() {
-    setSaveError("");
-    try { await api.saveSettings(s!); setSaved(true); }
-    catch (e) { setSaveError(String(e)); }
-  }
 
   async function join() {
     setSyncMsg(null);
@@ -149,7 +156,7 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         {saveError && <p role="alert" className="text-xs text-bad">{saveError}</p>}
 
         <Row label="Open panel">
-          <input onFocus={() => api.focus()} value={s.hotkey} onChange={(e) => update({ ...s, hotkey: e.target.value })} className="w-28 rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-right text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25" />
+          <HotkeyInput value={s.hotkey} set={(v) => update({ ...s, hotkey: v })} className="w-28 rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-right text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25" />
         </Row>
       </Section>
 
@@ -181,9 +188,12 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         )}
       </Section>
 
-      <div className="sticky bottom-0 -mx-3 -mb-3 mt-auto flex gap-2 bg-black px-3 pb-3 pt-3">
-        <button onClick={save} className="btn btn-primary flex-1 !py-2">{saved ? "Saved ✓" : "Save"}</button>
-        <button onClick={() => api.quit()} className="btn btn-ghost">Quit</button>
+      <div className="flex items-center justify-between px-1 pb-0.5 pt-1 text-[11.5px]">
+        <span aria-live="polite" className={`flex items-center gap-1.5 text-muted transition-opacity duration-300 ${saved ? "opacity-100" : "opacity-0"}`}>
+          <svg viewBox="0 0 12 12" className="h-3 w-3 text-[#34c759]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 6.2l2.2 2.2 4.8-4.9" /></svg>
+          Saved
+        </span>
+        <button onClick={() => api.quit()} className="btn btn-ghost !py-1 text-[12px] text-muted hover:text-bad">Quit AI Usage</button>
       </div>
     </div>
   );
@@ -246,6 +256,14 @@ function Memory() {
       {prefs.length > 1 && <button onClick={() => api.memoryClear().then(load)} className="mt-2 text-[11px] text-muted hover:text-fg">Forget everything</button>}
     </div>
   );
+}
+
+/** The hotkey saves when you finish typing it (Enter or click away), not on every key. */
+function HotkeyInput({ value, set, className }: { value: string; set: (v: string) => void; className: string }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => { if (draft.trim() && draft !== value) set(draft.trim()); };
+  return <input onFocus={() => api.focus()} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === "Enter" && commit()} className={className} />;
 }
 
 function HistoryToggle() {

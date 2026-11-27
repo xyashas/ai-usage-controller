@@ -310,6 +310,21 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
         s
     });
     if let Ok(mut m) = children().lock() { m.insert(id.to_owned(), child); }
+    // A CLI that hangs (waiting on a login, a stuck network) is stopped, not left spinning.
+    let timed_out = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let (key, flag) = (id.to_owned(), timed_out.clone());
+        let limit = std::time::Duration::from_secs(if mode == Mode::Deep { 600 } else { 180 });
+        std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            while start.elapsed() < limit {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                if !children().lock().map(|m| m.contains_key(&key)).unwrap_or(false) { return; }
+            }
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            kill_one(&key);
+        });
+    }
     let mut reader = StreamReader::default();
     let mut answer = String::new();
     if let Some(out) = stdout {
@@ -324,6 +339,9 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
     let stderr = err_tail.join().unwrap_or_default();
     let cancelled = status.is_none();
     let error = reader.error.or_else(|| {
+        if timed_out.load(std::sync::atomic::Ordering::SeqCst) && answer.trim().is_empty() {
+            return Some(format!("{} didn't answer in time. Try again, or pick another tool.", crate::tool_name(tool)));
+        }
         if cancelled { return Some("Stopped.".into()); }
         if answer.trim().is_empty() {
             let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("No answer came back.").trim().to_owned();
@@ -454,15 +472,23 @@ pub fn ask_cancel(id: String) {
     if let Ok(mut m) = children().lock() {
         let keys: Vec<String> = m.keys().filter(|k| **k == id || k.starts_with(&format!("{id}:"))).cloned().collect();
         for k in keys {
-            if let Some(mut ch) = m.remove(&k) {
-                #[cfg(windows)]
-                { let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &ch.id().to_string()]).output(); }
-                let _ = ch.kill();
-                let _ = ch.wait();
-            }
+            if let Some(ch) = m.remove(&k) { stop_child(ch); }
         }
     }
 }
+
+fn stop_child(mut ch: Child) {
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &ch.id().to_string()]).creation_flags(0x0800_0000).output(); }
+    let _ = ch.kill();
+    let _ = ch.wait();
+}
+
+fn kill_one(key: &str) {
+    let ch = children().lock().ok().and_then(|mut m| m.remove(key));
+    if let Some(ch) = ch { stop_child(ch); }
+}
+
 
 /// Replace / Draft reply: paste the answer where your cursor was.
 #[tauri::command]

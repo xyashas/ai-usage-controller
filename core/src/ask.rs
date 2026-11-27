@@ -610,14 +610,19 @@ pub fn voice_intent(said: &str, has_last: bool) -> Intent {
     }
     for lead in ["remember that ", "remember i ", "remember my ", "remember to always ", "remember to never ", "from now on ", "always ", "never "] {
         if b.starts_with(lead) && b.len() > lead.len() + 2 {
-            // "always" / "never" only as instructions ("always answer in bullets"), not questions.
-            if (lead == "always " || lead == "never ") && b.ends_with('?') { break; }
+            // "always" / "never" only as instructions to you ("always answer in
+            // bullets"), not statements or questions ("always returns undefined?").
+            if lead == "always " || lead == "never " {
+                let verb = b[lead.len()..].split(' ').next().unwrap_or("");
+                const DO: [&str; 16] = ["answer", "reply", "respond", "use", "give", "write", "keep", "talk", "explain", "include", "show", "call", "assume", "suggest", "add", "be"];
+                if raw.trim_end().ends_with('?') || !DO.contains(&verb) { continue; }
+            }
             let keep = if lead.starts_with("remember that") || lead == "from now on " { &b[lead.len()..] } else if lead.starts_with("remember to ") { &b["remember to ".len()..] } else if lead.starts_with("remember ") { &b["remember ".len()..] } else { b };
             return Intent::Remember(cased(raw, keep));
         }
     }
     for lead in ["i prefer ", "i like my answers ", "i'd like answers ", "call me "] {
-        if b.starts_with(lead) { return Intent::Remember(cased(raw, b)); }
+        if b.starts_with(lead) && !raw.trim_end().ends_with('?') { return Intent::Remember(cased(raw, b)); }
     }
 
     if !has_last { return Intent::Ask; }

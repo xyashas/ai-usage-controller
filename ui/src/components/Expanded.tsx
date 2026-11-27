@@ -11,7 +11,6 @@ import { countdown, usd, usedPct } from "../format";
 import { api } from "../api";
 import { alertTint, stateColor, tint, toolName, warnTint } from "../theme";
 import { ArrowIcon } from "./icons";
-import { StateDot } from "./AgentsView";
 
 /** The window shown first: the 5-hour limit when there is one, else the tightest. */
 export function primaryWindow(t: ToolStatus): WindowStatus | undefined {
@@ -35,7 +34,7 @@ function LiveChip({ t }: { t: ToolStatus }) {
   const label = t.live_note ? (t.reconnect ? "Signed out" : t.live_note) : live ? "Live" : t.source === "estimate" ? "Estimate" : "Learning";
   const tip = t.live_error ?? (live ? "Read from the vendor's own usage meter" : t.source === "estimate" ? "Estimated from local logs" : "Learning your limits from usage history");
   return (
-    <span title={tip} className="flex items-center gap-1 text-[10.5px] font-medium opacity-60">
+    <span title={tip} className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[10.5px] font-medium opacity-60">
       <span className={`h-1.5 w-1.5 rounded-full ${live ? "live-dot" : ""}`} style={{ background: live ? "#1f9d55" : "currentColor" }} />
       {label}
     </span>
@@ -50,7 +49,7 @@ function ToolCard({ t, snap, wide, paid, onView, refresh }: { t: ToolStatus; sna
         <ToolMark tool={t.tool} />
         <span className="truncate">{t.tool === "claude_code" ? "Claude" : t.label}</span>
       </span>
-      {!t.locked && !t.needs_connect && <LiveChip t={t} />}
+      {!t.locked && !t.needs_connect && !t.reconnect && <LiveChip t={t} />}
     </div>
   );
 
@@ -194,26 +193,33 @@ function AlertCard({ alert, snap, offer, cloud, onHandoff, onRepoHandoff, refres
   );
 }
 
-/** One line for running agents on the usage panel. */
+/** One line for running agents on the usage panel: what needs you first. */
 function AgentStrip({ agents, onOpen }: { agents: Snapshot["agents"]; onOpen: () => void }) {
-  const working = agents.filter((a) => a.state === "working" || a.state === "starting").length;
-  const waiting = agents.filter((a) => a.state === "idle" || a.state === "needs_approval").length;
-  const done = agents.filter((a) => a.state === "done").length;
-  const failing = agents.filter((a) => a.verify === "failed").length;
-  const queued = agents.filter((a) => a.state === "queued").length;
-  const parts = [working && `${working} working`, waiting && `${waiting} need${waiting === 1 ? "s" : ""} you`, failing ? `${failing} failing tests` : done && `${done} done`, queued && `${queued} queued`].filter(Boolean).join(" · ");
+  const n = (f: (a: Snapshot["agents"][number]) => boolean) => agents.filter(f).length;
+  const waiting = n((a) => a.state === "idle" || a.state === "needs_approval");
+  const working = n((a) => a.state === "working" || a.state === "starting");
+  const failing = n((a) => a.verify === "failed");
+  const done = n((a) => a.state === "done" && a.verify !== "failed");
+  const queued = n((a) => a.state === "queued");
+  const parts: { k: string; label: string; dot: string; pulse?: boolean }[] = [
+    waiting ? { k: "w", label: `${waiting} need${waiting === 1 ? "s" : ""} you`, dot: "#fbbf24", pulse: true } : null,
+    working ? { k: "r", label: `${working} working`, dot: "#4ade80" } : null,
+    failing ? { k: "f", label: `${failing} failing`, dot: "#f87171" } : null,
+    done ? { k: "d", label: `${done} done`, dot: "#60a5fa" } : null,
+    queued ? { k: "q", label: `${queued} queued`, dot: "#a1a1aa" } : null,
+  ].filter((x): x is NonNullable<typeof x> => !!x);
   return (
-    <button onClick={onOpen} className="tile fade-in flex items-center gap-3 !py-2.5 text-left transition-colors hover:bg-[#1b1b1e]">
-      <span className="flex -space-x-1.5">
-        {agents.slice(0, 4).map((a) => (
-          <span key={a.id} className="flex h-6 w-6 items-center justify-center rounded-lg ring-2 ring-[#141416]" style={{ background: tint[a.tool].bg, color: tint[a.tool].ink }}>
-            <ToolMark tool={a.tool} />
+    <button onClick={onOpen} className="tile fade-in group flex items-center gap-3 !py-2.5 text-left transition-colors hover:bg-[#1b1b1e]">
+      <span className="text-[12.5px] font-semibold">Agents</span>
+      <span className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden whitespace-nowrap text-[12px] text-muted">
+        {parts.map((p) => (
+          <span key={p.k} className="flex items-center gap-1.5">
+            <span className={`h-1.5 w-1.5 rounded-full ${p.pulse ? "animate-pulse" : ""}`} style={{ background: p.dot }} />
+            <span className={p.pulse ? "text-fg" : ""}>{p.label}</span>
           </span>
         ))}
       </span>
-      <span className="flex-1 text-[12.5px] font-medium">Agents{parts ? ` · ${parts}` : ""}</span>
-      {waiting > 0 && <StateDot state="needs_approval" />}
-      <span className="text-[12px] text-muted">Open →</span>
+      <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 shrink-0 text-muted transition-transform duration-200 group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l4 4-4 4" /></svg>
     </button>
   );
 }
@@ -264,8 +270,6 @@ export function Expanded({ snap, onView, refresh, onHandoff, onRepoHandoff }: {
     <div className="flex flex-col gap-2.5 p-3">
       <TopBar tab="panel" onView={onView} />
 
-      {snap.daily_recap && <DailyRecap recap={snap.daily_recap} onDismiss={async () => { await api.dismissDailyRecap(); refresh(); }} />}
-
       {alert && <AlertCard alert={alert} snap={snap} offer={alertOffer} cloud={cloud} onHandoff={onHandoff} onRepoHandoff={onRepoHandoff} refresh={refresh} />}
 
       <Approvals items={snap.approvals} refresh={refresh} />
@@ -295,6 +299,8 @@ export function Expanded({ snap, onView, refresh, onHandoff, onRepoHandoff }: {
           <button className="btn" onClick={() => onView("setup")}>Check setup</button>
         </section>
       )}
+
+      {snap.daily_recap && <DailyRecap recap={snap.daily_recap} onDismiss={async () => { await api.dismissDailyRecap(); refresh(); }} />}
 
       {hasActivity && (
         <section className={`tile grid gap-3 ${meter ? "grid-cols-3" : "grid-cols-2"}`}>

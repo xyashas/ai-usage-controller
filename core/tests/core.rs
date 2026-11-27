@@ -354,7 +354,7 @@ fn looping_session(now: DateTime<Utc>, turns: usize, cost_each: f64, repeat: boo
     let mut v = vec![ev(Tool::ClaudeCode, EventKind::UserPrompt, now - Duration::minutes(7), "loop", 0.0)];
     for i in 0..turns {
         let mut e = ev(Tool::ClaudeCode, EventKind::Assistant, now - Duration::minutes(6) + Duration::seconds(i as i64 * 20), "loop", cost_each);
-        e.tool_sig = Some(if repeat { format!("Edit:src/a.rs|Bash:cargo test{}", if i % 2 == 0 { "" } else { "" }) } else { format!("Edit:src/file{i}.rs") });
+        e.tool_sig = Some(if repeat { "Edit:src/a.rs|Bash:cargo test".to_owned() } else { format!("Edit:src/file{i}.rs") });
         v.push(e);
     }
     v

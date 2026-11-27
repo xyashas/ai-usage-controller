@@ -87,7 +87,8 @@ fn start_menu_apps() -> Vec<(String, String)> {
     use std::os::windows::process::CommandExt;
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
-    static CACHE: OnceLock<Mutex<Option<(Instant, Vec<(String, String)>)>>> = OnceLock::new();
+    type Apps = Vec<(String, String)>;
+    static CACHE: OnceLock<Mutex<Option<(Instant, Apps)>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some((at, apps)) = cache.lock().ok().and_then(|c| c.clone()) {
         if at.elapsed() < Duration::from_secs(300) { return apps; }

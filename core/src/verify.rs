@@ -104,7 +104,7 @@ pub fn run(dir: &Path, cmd: &str, timeout: Duration) -> Run {
             Ok(None) if start.elapsed() > timeout => {
                 // The shell's children too (cargo, node…).
                 #[cfg(windows)]
-                { let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &child.id().to_string()]).output(); }
+                { use std::os::windows::process::CommandExt; let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &child.id().to_string()]).creation_flags(0x0800_0000).output(); }
                 let _ = child.kill();
                 let _ = child.wait();
                 break Outcome::TimedOut;

@@ -49,16 +49,16 @@ export function Collapsed({ snap, onOpen, notch }: { snap: Snapshot; onOpen: () 
   const connect = t?.needs_connect && (t.today_requests === 0 || used == null);
   // Agents come first when one needs you; otherwise a small count of the busy ones.
   const asking = snap.approvals[0];
-  const waiting = snap.agents.find((a) => a.state === "needs_approval");
+  const waiting = snap.agents.filter((a) => a.state === "needs_approval").length;
   const busy = snap.agents.filter((a) => a.state === "working" || a.state === "starting").length;
 
   return (
-    <button title={note ? `Claude: ${note}` : undefined} onClick={claude?.reconnect && !asking ? () => { api.connectClaude().catch(onOpen); } : onOpen} className="flex h-full w-full items-center gap-2 px-4 text-left" aria-label={asking ? "An agent needs your OK. Open the panel" : claude?.reconnect ? "Reconnect Claude account" : "Open AI usage panel"}>
-      {asking || waiting ? (
-        <>
+    <button title={note ? `Claude: ${note}` : t ? t.label : undefined} onClick={claude?.reconnect && !asking ? () => { api.connectClaude().catch(onOpen); } : onOpen} className="flex h-full w-full items-center gap-2 px-4 text-left" aria-label={asking ? "An agent needs your OK. Open the panel" : waiting ? `${waiting} agent${waiting > 1 ? "s" : ""} waiting for you. Open the panel` : claude?.reconnect ? "Reconnect Claude account" : "Open AI usage panel"}>
+      {asking ? (
+        <span className="pill-swap flex min-w-0 flex-1 items-center justify-center gap-2">
           <span className="live-dot h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
-          <span className="flex-1 truncate text-center text-[11.5px] font-medium text-fg">{asking ? `${asking.tool === "codex" ? "Codex" : asking.tool === "gemini" ? "Gemini" : "Claude"} needs your OK` : "An agent needs you"}</span>
-        </>
+          <span className="truncate text-[11.5px] font-medium text-fg">{`${asking.tool === "codex" ? "Codex" : asking.tool === "gemini" ? "Gemini" : "Claude"} needs your OK`}</span>
+        </span>
       ) : setup || !t ? (
         <span className="flex-1 text-center text-[11.5px] font-medium text-muted">{setup ? "Finish setup" : "No AI tools found"}</span>
       ) : note ? (
@@ -70,17 +70,18 @@ export function Collapsed({ snap, onOpen, notch }: { snap: Snapshot; onOpen: () 
         </>
       ) : (
         <>
-          {busy > 0 && <span title={`${busy} agent${busy > 1 ? "s" : ""} working`} className="flex items-center gap-1 text-[10.5px] font-semibold text-ok"><span className="live-dot h-1.5 w-1.5 rounded-full bg-ok" />{busy}</span>}
-          <span className="max-w-[52px] truncate text-[11px] font-medium text-muted">{t.label}</span>
+          {waiting > 0 && <span title={`${waiting} agent${waiting > 1 ? "s" : ""} waiting for you`} className="flex items-center gap-1 text-[10.5px] font-semibold text-warn"><span className="live-dot h-1.5 w-1.5 rounded-full bg-warn" />{waiting}</span>}
+          {!waiting && busy > 0 && <span title={`${busy} agent${busy > 1 ? "s" : ""} working`} className="flex items-center gap-1 text-[10.5px] font-semibold text-ok"><span className="live-dot h-1.5 w-1.5 rounded-full bg-ok" />{busy}</span>}
+          {!(waiting || busy) && <span className="max-w-[52px] truncate text-[11px] font-medium text-muted">{t.label}</span>}
           {notch ? <svg aria-hidden="true" viewBox="0 0 16 16" className={`ml-auto h-4 w-4 ${textColor[own]}`}>
             <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" />
             <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="2" pathLength="100" strokeDasharray={`${shown ?? 0} 100`} transform="rotate(-90 8 8)" />
-          </svg> : <div className="flex-1">
+          </svg> : <div className="min-w-[28px] flex-1">
             <UsageBar used={used} color={own} size="sm" />
           </div>}
-          <span className={`tabular text-[12px] font-semibold ${used == null ? "text-muted" : own === "green" ? "text-fg" : textColor[own]}`}>{used == null ? "—" : `${shown ?? Math.round(used)}%`}</span>
+          <span className={`tabular shrink-0 text-[12px] font-semibold ${used == null ? "text-muted" : own === "green" ? "text-fg" : textColor[own]}`}>{used == null ? "—" : `${shown ?? Math.round(used)}%`}</span>
           {otherWorse && <span title={`Another ${t.label} limit is ${t.color === "red" ? "used up" : "running low"}`} className={`h-1.5 w-1.5 rounded-full ${t.color === "red" ? "bg-bad" : "bg-warn"}`} />}
-          {reset && <span className="tabular text-[10.5px] text-muted">{reset}</span>}
+          {reset && <span className="tabular shrink-0 whitespace-nowrap text-[10.5px] text-muted">{reset}</span>}
         </>
       )}
     </button>

@@ -387,7 +387,17 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       screenshot: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='100'><rect width='160' height='100' fill='%231e1e1e'/><rect x='0' y='0' width='34' height='100' fill='%23252526'/><rect x='44' y='14' width='90' height='6' rx='2' fill='%23569cd6'/><rect x='44' y='28' width='70' height='6' rx='2' fill='%239cdcfe'/><rect x='44' y='42' width='100' height='6' rx='2' fill='%23f44747'/></svg>",
       repo: "acme-web", pick: { tool: (args!.pinned as Tool) ?? "codex", reason: args!.pinned ? "your pick" : "Claude is at 96%" }, installed: ["claude_code", "codex", "gemini"],
     };
-    case "ask_start": mockAnswer(args!.req as AskRequest); return null;
+    case "ask_start": {
+      const req = args!.req as AskRequest;
+      const m = /^(?:please )?remember (?:that )?(.+)/i.exec(req.question.trim());
+      if (m && !req.history.length) {
+        const text = m[1].replace(/^./, (c) => c.toUpperCase()).replace(/\.?$/, ".");
+        mockPrefs.push({ id: Date.now(), text, at: new Date().toISOString() });
+        setTimeout(() => mockAskListeners.forEach((l) => l.done({ id: req.id, tool: null, reason: "noted", error: null, points: [], text: `Got it. I'll remember: ${text}`, opened_web: false })), 250);
+        return null;
+      }
+      mockAnswer(req); return null;
+    }
     case "buddy_state": {
       const m = new URLSearchParams(location.search).get("buddy");
       if (!m) return null;

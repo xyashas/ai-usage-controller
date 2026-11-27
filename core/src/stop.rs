@@ -41,6 +41,7 @@ pub fn interrupt_session(tool: Tool, project: Option<&str>) -> Result<usize> {
     if hits.is_empty() {
         return Err(anyhow!("Couldn't find the {} process for this session", tool.label()));
     }
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut n = 0;
     for pid in hits {
         if let Some(p) = sys.process(pid) {

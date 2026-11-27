@@ -109,3 +109,8 @@
 @media (prefers-reduced-motion: reduce) {
   .surface, .surface * { transition: none !important; animation: none !important; }
 }
+
+/* The pill's message slides in when it changes (e.g. "Claude needs your OK"). */
+.pill-swap { animation: pill-swap 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+@keyframes pill-swap { from { opacity: 0; transform: translateY(5px); filter: blur(2px); } to { opacity: 1; transform: none; filter: none; } }
+@media (prefers-reduced-motion: reduce) { .pill-swap { animation: none; } }

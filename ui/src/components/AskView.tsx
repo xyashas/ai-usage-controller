@@ -153,7 +153,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
         const [base, part] = d.id.split(":");
         setItems((all) => all.map((it) => {
           if (it.id !== base) return it;
-          if (!part) return { ...it, answer: { ...it.answer, done: d } };
+          if (!part) return { ...it, answer: { text: it.answer.text || d.text || "", done: d } };
           const cur = it.council?.[part as Tool] ?? { text: "" };
           return { ...it, council: { ...it.council, [part]: { ...cur, done: d } } };
         }));
@@ -366,7 +366,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
       {polish.error && <p className="px-1 text-[11.5px] text-bad">{polish.error}</p>}
       {polish.draft && <PolishDiffCard original={polish.draft.original} polished={polish.draft.polished} onAccept={(next) => { setText(next); polish.clear(); box.current?.focus(); }} onKeep={polish.clear} />}
       <p className="px-1 text-[10.5px] text-mute">
-        {mac ? "⌥⇧Space" : "Alt+Shift+Space"} from anywhere. Uses the AI tools you already have; {pref("history", "0") === "1" ? "the last 20 answers are kept on this computer" : "nothing is saved"}.
+        {mac ? "⌥⇧Space" : "Alt+Shift+Space"} from anywhere. Uses the AI tools you already have; {pref("history", "0") === "1" ? "the last 20 answers are kept on this computer" : "nothing is kept unless you say \u201cremember\u201d"}.
       </p>
     </div>
   );

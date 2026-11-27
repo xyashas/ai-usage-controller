@@ -30,6 +30,10 @@ fn commands_about_the_last_answer() {
 fn remembering_and_saving() {
     assert_eq!(voice_intent("Remember that I use TypeScript", false), Intent::Remember("I use TypeScript".into()));
     assert_eq!(voice_intent("always answer in bullet points", false), Intent::Remember("always answer in bullet points".into()));
+    assert_eq!(voice_intent("Always returns undefined, why?", false), Intent::Ask);
+    assert_eq!(voice_intent("never mind the tests, what does this do", false), Intent::Ask);
+    assert_eq!(voice_intent("I prefer tabs, how do I set that in Prettier?", false), Intent::Ask);
+    assert_eq!(voice_intent("never use semicolons", false), Intent::Remember("never use semicolons".into()));
     assert_eq!(voice_intent("I prefer short answers", false), Intent::Remember("I prefer short answers".into()));
     assert_eq!(voice_intent("forget that I use Vim", false), Intent::Forget("i use vim".into()));
     assert_eq!(voice_intent("remember this", true), Intent::Save(String::new()));
