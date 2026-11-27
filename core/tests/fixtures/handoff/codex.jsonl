@@ -1,0 +1,7 @@
+{"type": "session_meta", "payload": {"id": "selected", "cwd": "PROJECT_FOLDER"}}
+{"type": "event_msg", "payload": {"type": "user_message", "message": "Fix the checkout flow."}}
+{"type": "response_item", "payload": {"type": "custom_tool_call", "name": "functions.apply_patch", "input": "*** Add File: cart.rs\n+PRIVATE_BODY"}}
+{"type": "event_msg", "payload": {"type": "user_message", "message": "Keep the retry limit."}}
+{"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Implemented retry handling."}]}}
+{"type": "response_item", "payload": {"type": "function_call", "name": "functions.update_plan", "arguments": "{\"plan\": [{\"step\": \"Run integration tests.\", \"status\": \"pending\"}, {\"step\": \"Obsolete task\", \"status\": \"completed\"}]}"}}
+{"type": "response_item", "payload": {"type": "function_call_output", "output": "Process exited with code 1\nCheckout test failed."}}

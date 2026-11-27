@@ -50,9 +50,11 @@ Browser mock URL params (ui/src/api.ts): `?scenario=runaway|low|critical|unconne
 CLI: `cargo run -p aiuc-core --bin aiuc -- paths|status [--json]|watch|plan <tool> <plan>|audit|trial`.
 Set `AIUC_DATA_DIR=/some/dir` to use a throwaway database.
 
-CI (`.github/workflows/ci.yml`): core tests on Linux/macOS/Windows, unsigned
-macOS universal + Windows installers uploaded as artifacts
-(`bundles-macos-latest`, `bundles-windows-latest`), Linux compile check, ui/api/web.
+CI (`.github/workflows/ci.yml`): core tests on Linux/Windows, unsigned Windows
+installer artifact (`bundles-windows-latest`), Linux compile check, ui/api/web.
+macOS (core tests + universal `.dmg` as `bundles-macos-latest`) runs only via
+Actions → CI → Run workflow with "Build for Mac" ticked: Mac minutes cost 10×,
+and the owner chose to save them for now.
 `release.yml`: tag `v*` → signed draft release (needs secrets, see docs/RELEASING.md).
 **Always keep CI green; run the relevant tests before pushing.**
 
@@ -104,7 +106,7 @@ macOS universal + Windows installers uploaded as artifacts
 - One-click Stop (SIGINT) is unix-only and off by default.
 
 ### Widget window (`app/src-tauri/src/window.rs`, `hover.rs`, `ui/src/App.tsx`)
-- **One fixed-size transparent window (420×600) pinned top-centre. It never
+- **One fixed-size transparent window (580×700) pinned top-centre. It never
   resizes.** The pill and panel are one shared "surface" that morphs with CSS
   transitions. (Earlier versions resized the window and raced with a
   ResizeObserver, leaving a huge oval on screen — don't go back to that.)
@@ -113,28 +115,33 @@ macOS universal + Windows installers uploaded as artifacts
   `hover.rs` polls the cursor every 40 ms, toggles `set_ignore_cursor_events`,
   and emits `hover` true/false. That event is the single source of truth for
   open-on-hover (140 ms dwell) / close-on-leave (260 ms grace).
-- Views other than the main panel (settings, onboarding, setup, paywall, audit)
+- Views other than the main panel (handoffs, settings, onboarding, setup, paywall, audit)
   are "sticky": they don't close on leave, only on click-away (blur) or Esc.
   Blur is ignored while the cursor is over the shape.
-- Content height is measured from a stable wrapper (`innerRef`) and capped at 560.
+- The panel is 520 wide. Content height is measured from a stable wrapper (`innerRef`) and capped at 640.
 - Typing needs keyboard focus: inputs call `api.focus()` on focus.
 - macOS: window level 25 (above menu bar), all Spaces; notch height from
   `NSScreen.safeAreaInsets`.
 
 ### Widget appearance and usage history
-- The native 420×600 window stays fixed. CSS animates the surface to its measured
-  view height. The OS selects the panel palette. A collapsed Mac notch stays black
-  in both themes and uses a small usage ring. Other pills use a horizontal meter.
+- Look: black panel (matches the notch), always dark. Inspired by NotchOwl: each
+  tool is a soft tinted tile with dark ink (`ui/src/theme.ts`: Claude clay,
+  Codex sky, Gemini lavender; alerts rose/amber). Shared classes live in
+  `styles.css` (`tile`, `card`, `btn`, `btn-primary`, `btn-ink`, `seg`, `eyebrow`,
+  `field`, `icon-btn`). Use them instead of ad-hoc Tailwind so views stay consistent.
+- Top bar (`TopBar.tsx`): name, a Usage / Handoff switch, Check setup, Settings.
+- **The 5-hour limit is shown first** (big number) for every tool, the pill and
+  the alert; weekly and others are smaller rows under it (`primaryWindow` in
+  `Expanded.tsx`). The pill adds a dot when another limit is worse.
 - The pill counts to its next percentage and only pulses for red alerts. Reduced
   motion disables transitions, pulses and counting. Hidden layers are inert,
   Tab reaches the visible controls, Enter activates them and Esc returns to the pill.
-- The main meter's sparkline uses the last 24 hours of stored samples for its
-  binding window after tier gating. Five-minute buckets retain window changes.
-  Dashed ticks mark elapsed reset times from the samples. Long gaps are left open.
-  Tools without gauge history omit the chart.
-- Preview a view directly with `?view=panel|settings|setup|paywall|audit|onboarding`.
-  Use `?platform=macos&notch=32` for a notched Mac, and `?scenario=empty|learning`
-  to check the first-use states.
+- The Claude tile shows a 24-hour sparkline of the live gauge only when it is the
+  only tool (full width). Tools without gauge history omit it.
+- Preview a view directly with `?view=panel|handoffs|settings|setup|paywall|audit|onboarding`.
+  Use `?platform=macos&notch=32` for a notched Mac, `?scenario=critical` (local
+  handoff in the alert), `?scenario=cloud` (no local session: the alert offers the
+  newest repo handoff), and `?scenario=empty|learning|unconnected` for first use.
 
 ### Desktop lifecycle
 - Launch at login defaults on once onboarding is complete, including existing
@@ -190,18 +197,136 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
 `app/src-tauri/tauri.updater.conf.json`, code-signing secrets.
 
 ## Roadmap (agreed next steps, in order)
-1. **One-click handoff when about to be cut off.** At ~95% (or on the alert),
-   a "Continue in Codex / Gemini" button: read the active Claude Code session from
-   its local JSONL (last user goals, files touched, open TODOs, last errors),
-   build a concise handoff prompt, copy it to the clipboard and open a terminal in
-   the same project folder running the other CLI. Never send log content anywhere
-   but the user's own clipboard/terminal. Also the reverse direction.
+1. **One-click handoff implemented.** A tracked Claude Code or Codex five-hour
+   or weekly window at 90% used, or a red low-limit alert, offers installed
+   destination CLIs for the most recent source session within two hours. Gemini
+   is a destination. The sticky preview reads only the selected local log and
+   accepts edits. Native code binds confirmation to that preview's folder and
+   destination, saves under 1,500 words to `.aiuc-handoff.md`, lists that file in
+   the repo's `.git/info/exclude` (never the tracked `.gitignore`; worktrees and
+   subfolders handled), copies to the clipboard, and launches the CLI in that folder.
+   CLI lookup (`handoff::executable`) checks PATH plus common install folders
+   (Homebrew, npm global, nvm, Volta, bun, ~/.local/bin, %APPDATA%\npm) and, on
+   macOS, the login shell — GUI apps there get a minimal PATH. Results are cached
+   for 60 s because the snapshot asks every few seconds.
+   Windows: the command is passed as `-EncodedCommand` with single-quoted literal
+   paths (no env vars: Windows Terminal tabs don't inherit them); Windows Terminal
+   first, then a new PowerShell console. macOS uses Terminal.app. Linux uses
+   wl-copy/xclip and x-terminal-emulator/xterm.
+   Fixture tests cover both source formats. Verified on Windows by the owner: TBD.
+   **Test handoff** (Check setup): `Engine::test_handoff_offers` offers the latest
+   Claude Code/Codex session from the last 24 h whatever the usage; the preview
+   command accepts `test: true` and validates against that list instead of the
+   snapshot. Same preview → confirm → launch path as the real handoff.
+1b. **Destinations: app, terminal or web** (`app/src-tauri/src/handoff.rs`).
+   Claude Code opens the Claude desktop app (its Code tab), Codex the Codex app,
+   when installed; otherwise the web (claude.ai/code, chatgpt.com/codex). Gemini
+   opens its CLI in a terminal, else gemini.google.com. The preview has an
+   "Open in" switch (app / Terminal / Web) listing what exists, best first. The
+   prompt always goes to the clipboard; app and web need a paste (no deep link
+   takes a prompt). App detection: macOS `/Applications/{Claude,Codex}.app`
+   (and ~/Applications), Windows exe under %LOCALAPPDATA% or a registered
+   `claude://` / `codex://` scheme (Store installs). Owner to verify on Windows.
+1c. **Repo-based handoff for cloud and local** (`core/src/repo_handoff.rs`,
+   `core/data/aiuc-hook.mjs`, Handoff tab `ui/src/components/HandoffHub.tsx`).
+   The repo is the one place every agent shares, so the handoff lives there:
+   **Set up** (per repo, optional commit, never pushes) adds `.aiuc/hook.mjs`, a
+   marked rule block in `AGENTS.md`/`CLAUDE.md` (and `GEMINI.md` if present) and
+   a Claude Code `Stop` hook in `.claude/settings.json`. After every turn, locally
+   and in Claude Code cloud, the hook rewrites the auto section of
+   `.aiuc/handoff.md` from the transcript (goal, requests, files, to-dos, last
+   reply, errors; secrets redacted; no network) and keeps the agent-written
+   **Status** above it. In the cloud it `git add`s the file so it ships with the
+   next commit. Codex/Gemini (cloud or local) follow the rule to read it first and
+   keep Status current. The widget lists repos from recent session folders plus
+   ones added with **+** (settings `repos`), fetches origin (25 s timeout, no
+   prompts) to see handoffs pushed by cloud agents, finds the newest handoff on
+   any branch (`repo_handoff::latest`), and previews "Continue <repo> on branch X
+   in <tool>". When a limit alert has no local session (you were in the cloud),
+   the alert offers the newest repo handoff from the last 12 h.
+   Next: Codex limits for cloud-only users (ChatGPT account connection,
+   feasibility unverified); cloud token counts for the meter.
+1d. **Agent dispatcher (Agents tab, Alt+Shift+A).** Type or dictate a request;
+   `core/src/dispatch.rs` splits it into tasks with plain rules (newline, `;`, or a
+   comma/"and"/"then" followed by a named tool; "fix X and add tests" stays one
+   task; "Claude and Codex …" is a list, not a directive) and routes each: a named
+   tool wins, otherwise the ready tool (CLI installed) with the most room on its
+   5-hour limit, +10 points per task already given to it in the batch so parallel
+   work spreads out; ≥90% used goes last. Each task can get its own worktree
+   (`<parent>/<repo>.agents/<slug>` on branch `agents/<slug>`, default on for 2+
+   tasks) and opens its CLI in a terminal with the task as the first message.
+   Every task is written to the local `tasks` table (the outcomes ledger, the base
+   for learned routing later). `Engine::agent_runs` matches each task to session
+   events by folder and tool: starting / working (activity ≤90 s) / idle ("Your
+   turn") / no_activity; with cost and request counts. Shown in the Agents tab and
+   as a strip on the Usage panel. Dictation uses the OS: Win+H (sent with
+   `keybd_event`) or macOS `startDictation:`; nothing is recorded by the app.
+   Next: morning brief / weekly recap (Gemini, branch `gemini/daily-weekly-recap`),
+   learned routing.
+1e. **Destinations everywhere + GitHub.** App detection on Windows uses
+   `Get-StartApps` (cached 5 min) and launches `explorer shell:AppsFolder\<AppID>`,
+   so Store installs work; Codex falls back to the **ChatGPT app** (Codex is in its
+   sidebar). Each dispatcher task has its own Open in (app / terminal / web), the
+   last choice per tool is remembered (`ui/src/prefs.ts`). Terminal tasks start
+   together; app/web tasks are copied and opened one at a time ("Copy & open next")
+   so each has the clipboard to itself. App/web prompts name the folder/branch or
+   GitHub repo. **GitHub** (`core/src/github.rs`): connect with the `gh` CLI login,
+   a pasted token, or device-flow "Sign in with GitHub" when the build sets
+   `AIUC_GITHUB_CLIENT_ID` (an OAuth app's client id; owner to create). Token in
+   the local kv store, sent only to api.github.com. Repos not cloned here appear as
+   `github:owner/name` (cloud tasks via web/app; Clone button clones with the token
+   and resets the remote to the plain URL). Task rows store `dest`; app/web tasks
+   show "Opened" until local logs show activity.
+1f. **Auto paste and send** (`app/src-tauri/src/autosend.rs`, setting `auto_send`,
+   default on). After opening an app/web page, wait (15 s app / 20 s web) for the
+   foreground window whose title or app name contains the tool's keyword (claude /
+   codex|chatgpt / gemini; never our own window), let it settle (1.8 s / 3 s),
+   re-check, then Ctrl/Cmd+V and Enter (Windows `keybd_event`, macOS System Events,
+   which needs Accessibility permission). The ChatGPT app gets paste only (it opens
+   on a normal chat, not Codex). If the window never shows, nothing is typed and
+   the prompt stays on the clipboard. The dispatcher sends app/web tasks one after
+   another while each is delivered; it stops and offers "Copy & open next" otherwise.
+1g. **Agent status + approvals from the notch** (`core/src/agent_status.rs`,
+   `app/src-tauri/src/agents.rs`, `ui/src/components/Approvals.tsx`). Off until
+   the user turns it on (Agents tab card or Settings → Agents), because it edits
+   their global tool config: `~/.claude/settings.json` gets hooks on
+   UserPromptSubmit, Stop, Notification (permission/idle prompts) and
+   PermissionRequest; `~/.codex/config.toml` gets a top-level `notify` (left alone
+   if Codex already notifies another program). The hook is this same app binary:
+   `main` calls `hook_main()` first, which handles `--aiuc-hook claude|codex` and
+   exits before Tauri starts. Our entries are found by the `--aiuc-hook` flag, so
+   install/uninstall never touches other hooks, and they are rewritten at startup
+   so they follow the app if it moves. Each event writes one status file per
+   session in `<data dir>/agents/sessions/` (folder, kind, time; never the prompt
+   or reply). `Engine::agent_runs` prefers that report over log timing unless the
+   logs show newer activity: states add `needs_approval`, `done`, `queued`.
+   **Approvals**: on PermissionRequest the hook writes `agents/pending/<id>.json`
+   (tool name + one-line summary such as the command) and waits up to 60 s for
+   `agents/answers/<id>.json` from the widget (Allow / Deny / In terminal). No
+   answer, or the widget not running (heartbeat file `agents/alive` older than
+   20 s), means no output, so Claude Code asks in the terminal as usual. Both files
+   are deleted when answered. The panel pops open and the pill pulses amber.
+   Unverified: whether Claude Code shows its own prompt while the hook waits.
+1h. **Verified done** (`core/src/verify.rs`, setting `verify_done`, default on).
+   When a task's agent is done (Stop report, quiet 20 s) or idle, and there was
+   activity since the last run (within 2 h), the worker runs the project's tests
+   in the task folder: `.aiuc/verify` first line, else cargo / pnpm|yarn|bun|npm
+   test (not npm's placeholder) / go / pytest / `make test`. One run at a time, 15
+   min timeout (Windows kills the process tree). The task stores only the result
+   and seconds; the last 40 lines of output stay in memory for "show". Notifies
+   "Codex finished: tests pass".
+1i. **Queue at limit reset.** `ToolRoom.resets_at` is the used-up window's reset
+   (else the 5-hour one). In the dispatcher a task for a tool at ≥98% shows a
+   "Queued · 4:12 PM" chip (on by default, click to send anyway). Queued tasks
+   are rows with `queued_until` (and `worktree`); the worker sends due ones when
+   the tool shows >5% room: terminal at once, app/web only after 20 s without
+   keyboard/mouse input (`autosend::idle_secs`) since they're pasted in. Each row
+   offers Send now / Move to <roomiest tool> (`run_queued`).
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).
-3. **"Use it or lose it" + task queue.** Warn when a window will reset with lots
-   unused; let the user queue a task (`claude -p "<task>"` in a folder) that runs
-   when the limit resets or overnight.
+3. **"Use it or lose it".** Warn when a window will reset with lots unused (the
+   queue at reset is done, see 1i).
 4. **"What used up my limit?"** Plain-English breakdown of what burned the
    window (session, repeated file reads, cache misses, model choice) with a fix.
 5. Team: seat right-sizing report on the dashboard; deploy `api/` (Fly) and `web/` (Vercel).
@@ -209,7 +334,11 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
 
 ## Conventions
 - Keep UI copy plain and short; show % used; label estimates as "est.".
-- Privacy is a feature: never store or sync prompt text, code, file names or
+- The user-confirmed local handoff file and the dispatcher's local `tasks` table
+  (task text you typed, kept on this machine, never synced) are the explicit
+  persistence exceptions. A pending approval file (tool name + one-line summary)
+  exists only until it is answered or times out.
+  In usage tracking, never store or sync prompt text, code, file names or
   project names (sync sends counts only — there's a test for this). Keep it that way.
 - New core logic gets a test in `core/tests/core.rs`.
 - Commit messages: imperative summary line, then bullets of what/why.

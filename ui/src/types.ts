@@ -59,7 +59,12 @@ export interface AuditResult { tool: Tool; current_plan: string; current_price: 
 
 export interface Entitlements { tier: Tier; trial_ends_at: string | null; trial_available: boolean; licence_status: string | null; max_devices: number }
 
+export interface HandoffOffer { source: Tool; session: string; targets: Tool[] }
+
 export interface Snapshot {
+  agents: AgentRun[];
+  approvals: Approval[];
+  handoffs: HandoffOffer[];
   gauge_history: { at: number; used: number; reset_at: number | null }[];
   idle_hidden: boolean;
   generated_at: string;
@@ -92,6 +97,10 @@ export interface Settings {
   live_gauges: boolean;
   claude_web: boolean;
   api_base: string;
+  auto_send: boolean;
+  agent_status: boolean;
+  approvals: boolean;
+  verify_done: boolean;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
 export type Mode = "collapsed" | "expanded";
@@ -119,3 +128,28 @@ export interface Diagnostics {
   tools: ToolDiagnostics[];
 }
 export interface Rect { x: number; y: number; w: number; h: number }
+
+export type Dest = "app" | "terminal" | "web";
+export interface DestOption { dest: Dest; label: string }
+export interface HandoffPreviewData { id: number; prompt: string; destinations: DestOption[]; place: string }
+export interface RepoLatest { branch: string; updated_at: number; origin: "commit" | "working tree"; content: string }
+export interface RepoStatus { id: string; local: boolean; root: string; name: string; set_up: boolean; current_branch: string; github: string | null; latest: RepoLatest | null }
+export interface SetupResult { root: string; changed: string[]; committed: boolean }
+
+export type AgentState = "starting" | "working" | "idle" | "done" | "needs_approval" | "no_activity" | "opened" | "queued";
+export type VerifyState = "running" | "passed" | "failed" | "timed_out" | "error";
+export interface AgentRun {
+  id: number; tool: Tool; text: string; repo_name: string; branch: string | null; cwd: string; started_at: string; state: AgentState;
+  dest: Dest | null; cost_usd: number; requests: number; last_activity_at: string | null;
+  queued_until: string | null; verify: VerifyState | null; verify_secs: number | null; verify_at: string | null;
+}
+/** A tool call waiting for your OK. The summary is shown, never stored. */
+export interface Approval { id: string; tool: Tool; session: string; cwd: string; repo_name: string; tool_name: string; summary: string; at: string }
+export type ApprovalAnswer = "allow" | "deny" | "ask";
+export interface InstallResult { claude: boolean; codex: boolean; codex_busy: boolean }
+export interface Routed { text: string; tool: Tool | null; explicit: boolean; reason: string }
+export interface ToolRoom { tool: Tool; ready: boolean; used_pct: number | null; active: boolean; resets_at: string | null }
+export interface DispatchPlan { tasks: Routed[]; rooms: ToolRoom[]; dests: Record<Tool, DestOption[]> }
+export interface Started { text: string; tool: Tool; dest: Dest; branch: string | null; message: string | null; delivered: boolean; error: string | null }
+export interface GithubStatus { login: string | null; cli: boolean; device_flow: boolean }
+export interface DeviceCode { device_code: string; user_code: string; verification_uri: string; interval: number }

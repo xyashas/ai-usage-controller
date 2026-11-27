@@ -11,7 +11,11 @@
 //! which never leaves the machine.
 
 pub mod advice;
+pub mod agent_status;
+pub mod dispatch;
 pub mod engine;
+pub mod github;
+pub mod handoff;
 pub mod entitlements;
 pub mod licence;
 pub mod live;
@@ -20,6 +24,7 @@ pub mod model;
 pub mod parsers;
 pub mod paths;
 pub mod plans;
+pub mod repo_handoff;
 pub mod pricing;
 pub mod runaway;
 pub mod scanner;
@@ -28,6 +33,7 @@ pub mod snapshot;
 pub mod stop;
 pub mod store;
 pub mod sync;
+pub mod verify;
 
 pub use engine::Engine;
 pub use model::{Tool, UsageEvent};

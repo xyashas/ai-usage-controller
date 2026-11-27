@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Snapshot } from "./types";
+import { HandoffPreview, type Draft } from "./components/HandoffPreview";
+import type { HandoffOffer, RepoStatus, Tool, Snapshot } from "./types";
+import { HandoffHub } from "./components/HandoffHub";
+import { AgentsView } from "./components/AgentsView";
 import { api, inTauri, onHover, onOpenView, onSnapshot, onToggle } from "./api";
 import { Collapsed } from "./components/Collapsed";
 import { Expanded } from "./components/Expanded";
@@ -9,14 +12,14 @@ import { SettingsView } from "./components/SettingsView";
 import { Onboarding } from "./components/Onboarding";
 import { CheckSetup } from "./components/CheckSetup";
 
-export type View = "panel" | "settings" | "paywall" | "audit" | "onboarding" | "setup";
+export type View = "panel" | "agents" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
 type Platform = "macos" | "windows" | "linux";
 
-const PANEL_W = 360;
-const MAX_H = 560;
+const PANEL_W = 520;
+const MAX_H = 640;
 const OPEN_DELAY = 140; // hover this long before the panel opens (stops drive-by opens)
 const CLOSE_DELAY = 260; // grace period after the cursor leaves
-const ANIM_MS = 380;
+const ANIM_MS = 420;
 
 function pillSize(platform: Platform, notch: number) {
   if (platform === "macos" && notch > 0) return { w: 236, h: notch + 22, top: 0 };
@@ -28,6 +31,7 @@ export default function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [open, setOpenState] = useState(false);
   const [mounted, setMounted] = useState(false); // panel content stays mounted while closing
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [view, setView] = useState<View>("panel");
   const [platform, setPlatform] = useState<Platform>("windows");
   const [notch, setNotch] = useState(0);
@@ -36,6 +40,7 @@ export default function App() {
   const openRef = useRef(false);
   const hoverRef = useRef(false); // cursor is over the widget's shape
   const viewRef = useRef<View>("panel");
+  const backTo = useRef<View>("panel"); // where a handoff preview returns to
   const hoverTimer = useRef<number | undefined>(undefined);
   const unmountTimer = useRef<number | undefined>(undefined);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -56,6 +61,7 @@ export default function App() {
         // Keep onboarding mounted so a half-finished setup isn't lost.
         if (viewRef.current !== "onboarding") setMounted(false);
         // Back to the main panel next time, unless setup isn't finished.
+        setDraft(null);
         setView((v) => (v === "onboarding" ? v : "panel"));
       }, ANIM_MS);
     }
@@ -132,6 +138,14 @@ export default function App() {
     }
   }, [snap, view, setOpen]);
 
+  // A tool asking for your OK pops the panel open, once per request.
+  const seenApprovals = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = snap?.approvals.filter((a) => !seenApprovals.current.has(a.id)) ?? [];
+    fresh.forEach((a) => seenApprovals.current.add(a.id));
+    if (fresh.length && !openRef.current) setOpen(true);
+  }, [snap, setOpen]);
+
   // A red alert pops the panel open once.
   const lastAlert = useRef<string | null>(null);
   useEffect(() => {
@@ -179,7 +193,7 @@ export default function App() {
   const pill = pillSize(platform, notch);
   const mac = platform === "macos";
   const height = open ? contentH : pill.h;
-  const radius = open ? (mac ? "0 0 28px 28px" : "24px") : mac ? `0 0 ${Math.min(16, pill.h / 2)}px ${Math.min(16, pill.h / 2)}px` : `${pill.h / 2}px`;
+  const radius = open ? (mac ? "0 0 30px 30px" : "28px") : mac ? `0 0 ${Math.min(16, pill.h / 2)}px ${Math.min(16, pill.h / 2)}px` : `${pill.h / 2}px`;
   const alert = snap.alerts[0];
 
   const goto = (v: View) => {
@@ -187,13 +201,26 @@ export default function App() {
     if (v !== "panel") api.focus();
   };
 
+  function preview(offer: HandoffOffer, target: Tool, test = false) {
+    backTo.current = viewRef.current;
+    const request = api.previewHandoff(offer.source, offer.session, target, test);
+    setDraft({ source: offer.source, target, preview: request });
+    goto("handoff");
+  }
+
+  function previewRepo(repo: RepoStatus, target: Tool) {
+    backTo.current = viewRef.current;
+    setDraft({ target, preview: api.previewRepoHandoff(repo.root, target) });
+    goto("handoff");
+  }
+
   return (
     <div className="relative h-full w-full">
       <div
         ref={surfaceRef}
         onMouseEnter={inTauri ? undefined : () => onHoverChange(true)}
         onMouseLeave={inTauri ? undefined : () => onHoverChange(false)}
-        className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && alert?.level === "red" ? "pulse-red" : ""} ${!open && mac && notch ? "notch-pill" : ""}`}
+        className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && snap.approvals.length ? "pulse-amber" : !open && alert?.level === "red" ? "pulse-red" : ""} ${!open && mac && notch ? "notch-pill" : ""}`}
         aria-hidden={hidden}
         inert={hidden}
         style={{ opacity: hidden ? 0 : 1, pointerEvents: hidden ? "none" : undefined, top: pill.top, width: open ? PANEL_W : pill.w, height, borderRadius: radius, transform: "translateX(-50%)" }}
@@ -212,7 +239,13 @@ export default function App() {
             style={{ width: PANEL_W, maxHeight: MAX_H, opacity: open ? 1 : 0 }}
           >
             <div ref={innerRef} style={{ paddingTop: mac ? notch : 0 }}>
-            {view === "onboarding" ? (
+            {view === "handoff" && draft ? (
+              <HandoffPreview draft={draft} onBack={() => { setDraft(null); setView(backTo.current === "handoff" ? "panel" : backTo.current); }} />
+            ) : view === "agents" ? (
+              <AgentsView snap={snap} onView={goto} refresh={refresh} />
+            ) : view === "handoffs" ? (
+              <HandoffHub onView={goto} onHandoff={(offer, target) => preview(offer, target, true)} onRepoHandoff={previewRepo} />
+            ) : view === "onboarding" ? (
               <Onboarding
                 onDone={async () => {
                   await refresh();
@@ -226,9 +259,9 @@ export default function App() {
             ) : view === "audit" ? (
               <AuditCard snap={snap} onBack={() => setView("panel")} refresh={refresh} />
             ) : view === "setup" ? (
-              <CheckSetup onBack={() => setView("panel")} />
+              <CheckSetup onBack={() => setView("panel")} onTestHandoff={(offer, target) => preview(offer, target, true)} />
             ) : (
-              <Expanded snap={snap} onView={goto} refresh={refresh} />
+              <Expanded onHandoff={preview} onRepoHandoff={previewRepo} snap={snap} onView={goto} refresh={refresh} />
             )}
             </div>
           </div>

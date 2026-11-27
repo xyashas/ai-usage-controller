@@ -37,3 +37,72 @@ export function Check({ ok }: { ok: boolean | null }) {
     </span>
   );
 }
+
+export function SwapIcon() {
+  return (
+    <svg {...base} width={14} height={14} aria-hidden>
+      <path d="M4 8h14l-4-4M20 16H6l4 4" />
+    </svg>
+  );
+}
+
+export function PlusIcon() {
+  return (
+    <svg {...base} width={14} height={14} aria-hidden>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+export function RefreshIcon({ spin = false }: { spin?: boolean }) {
+  return (
+    <svg {...base} width={14} height={14} aria-hidden className={spin ? "animate-spin" : undefined}>
+      <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" />
+    </svg>
+  );
+}
+
+export function ArrowIcon() {
+  return (
+    <svg {...base} width={12} height={12} strokeWidth={2.2} aria-hidden>
+      <path d="M7 17 17 7M8 7h9v9" />
+    </svg>
+  );
+}
+
+export function BranchIcon() {
+  return (
+    <svg {...base} width={12} height={12} aria-hidden>
+      <circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" />
+      <path d="M6 7v10M18 9c0 5-6 4-12 8" />
+    </svg>
+  );
+}
+
+export function CloseIcon() {
+  return (
+    <svg {...base} width={14} height={14} aria-hidden>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+/** The app's mark: a small gauge. */
+export function Logo() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+      <rect x="1" y="1" width="22" height="22" rx="7" fill="#F1D9CB" />
+      <path d="M6.5 15.5a5.5 5.5 0 0 1 11 0" fill="none" stroke="#2A1810" strokeWidth="2.2" strokeLinecap="round" />
+      <path d="M12 15.5l3-4" stroke="#C4673F" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function MicIcon() {
+  return (
+    <svg {...base} width={15} height={15} aria-hidden>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+    </svg>
+  );
+}

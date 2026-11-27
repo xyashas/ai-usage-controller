@@ -1,3 +1,4 @@
+import { BackIcon } from "./icons";
 import { ToolMark } from "./ToolMark";
 import type { Snapshot } from "../types";
 import { api } from "../api";
@@ -14,8 +15,8 @@ export function AuditCard({ snap, onBack, refresh }: { snap: Snapshot; onBack: (
   const paid = snap.audit.reduce((s, a) => s + a.current_price, 0);
   const best = [...snap.audit].sort((a, b) => b.monthly_saving_usd - a.monthly_saving_usd)[0];
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <button onClick={onBack} className="self-start text-[12px] text-muted hover:text-fg">← Back</button>
+    <div className="flex flex-col gap-3 p-3">
+      <button onClick={onBack} className="btn btn-ghost self-start !pl-1.5"><BackIcon /> Back</button>
       <div className="text-[11px] uppercase tracking-wide text-muted">Monthly plan audit</div>
       {best ? (
         <>
@@ -38,7 +39,7 @@ export function AuditCard({ snap, onBack, refresh }: { snap: Snapshot; onBack: (
           {(best.action === "downgrade" || best.action === "cancel" || best.action === "upgrade") && (
             <button
               onClick={async () => { await api.acceptAudit(best.tool); refresh(); onBack(); }}
-              className="rounded-full bg-accent py-2.5 text-[14px] font-semibold text-canvas"
+              className="btn btn-primary w-full !py-2.5 text-[13px]"
             >
               {best.action === "cancel" ? `I cancelled ${LABEL[best.tool]}` : `I switched to ${best.target_plan}`}
             </button>

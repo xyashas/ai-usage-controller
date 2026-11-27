@@ -633,3 +633,127 @@ fn history_tracks_only_the_binding_window_inside_the_last_day() {
     approx(history[1].used, 25.0);
     assert_eq!(history[0].reset_at, Some((now - Duration::hours(1)).timestamp_millis()));
 }
+
+#[test]
+fn handoff_summarizes_claude_and_codex_fixture_logs_locally() {
+    for (source, fixture, filename) in [
+        (Tool::ClaudeCode, "claude.jsonl", "selected.jsonl"),
+        (Tool::Codex, "codex.jsonl", "rollout-2026-11-27-selected.jsonl"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let log_dir = dir.path().join("logs");
+        std::fs::create_dir(&log_dir).unwrap();
+        let contents = std::fs::read_to_string(fixtures("handoff").join(fixture)).unwrap()
+            .replace("\"PROJECT_FOLDER\"", &serde_json::to_string(dir.path()).unwrap());
+        std::fs::write(log_dir.join(filename), contents).unwrap();
+        let (cwd, prompt) = aiuc_core::handoff::prepare(&[log_dir], source, "selected").unwrap();
+        assert_eq!(cwd, dir.path());
+        assert!(!cwd.join(".aiuc-handoff.md").exists(), "preview is read-only");
+        for expected in ["Fix the checkout flow.", "Keep the retry limit.", "cart.rs", "Checkout test failed.",
+            "Implemented retry handling.", "- [ ] Run integration tests."] {
+            assert!(prompt.contains(expected), "{source:?} missing {expected}");
+        }
+        for excluded in ["PRIVATE_BODY", "private side thread", "read-only.txt", "Obsolete task"] {
+            assert!(!prompt.contains(excluded));
+        }
+        assert!(prompt.split_whitespace().count() < 1500);
+    }
+}
+
+#[test]
+fn handoff_saves_edits_and_hides_the_file_from_git_without_touching_gitignore() {
+    use aiuc_core::handoff::{save, FILENAME};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    // Not a repository: just the file.
+    save(path, "first draft").unwrap();
+    assert!(!path.join(".git").exists());
+
+    // A repository whose project folder is a subfolder of the repo root.
+    std::fs::create_dir_all(path.join(".git/info")).unwrap();
+    std::fs::write(path.join(".gitignore"), "build/\r\nlogs/").unwrap();
+    std::fs::write(path.join(".git/info/exclude"), "# git ls-files --others --exclude-from=.git/info/exclude").unwrap();
+    let sub = path.join("app");
+    std::fs::create_dir(&sub).unwrap();
+    save(&sub, "edited local prompt").unwrap();
+    save(&sub, "edited local prompt").unwrap();
+    assert_eq!(std::fs::read_to_string(path.join(".gitignore")).unwrap(), "build/\r\nlogs/", "tracked .gitignore untouched");
+    let exclude = std::fs::read_to_string(path.join(".git/info/exclude")).unwrap();
+    assert_eq!(exclude.matches(FILENAME).count(), 1, "added once: {exclude}");
+    assert!(exclude.ends_with(&format!("\n{FILENAME}\n")));
+    assert!(save(&sub, &"word ".repeat(1500)).is_err());
+    assert_eq!(std::fs::read_to_string(sub.join(FILENAME)).unwrap(), "edited local prompt");
+
+    // A worktree: `.git` is a file pointing at the real git dir, whose commondir holds info/exclude.
+    let wt = tempfile::tempdir().unwrap();
+    let common = wt.path().join("main.git");
+    let gd = common.join("worktrees/feature");
+    std::fs::create_dir_all(&gd).unwrap();
+    std::fs::write(gd.join("commondir"), "../..").unwrap();
+    let checkout = wt.path().join("feature");
+    std::fs::create_dir(&checkout).unwrap();
+    std::fs::write(checkout.join(".git"), format!("gitdir: {}\n", gd.display())).unwrap();
+    save(&checkout, "worktree prompt").unwrap();
+    let ex = std::fs::read_to_string(common.join("info/exclude")).unwrap();
+    assert_eq!(ex, format!("{FILENAME}\n"));
+}
+
+#[test]
+fn handoff_finds_clis_outside_a_gui_apps_short_path() {
+    use aiuc_core::handoff::{extra_dirs, find_executable};
+    let home = tempfile::tempdir().unwrap();
+    // nvm: the newest Node version wins.
+    for v in ["v20.1.0", "v22.3.0"] {
+        let bin = home.path().join(".nvm/versions/node").join(v).join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let name = if cfg!(windows) { "codex.cmd" } else { "codex" };
+        let f = bin.join(name);
+        std::fs::write(&f, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let extra = extra_dirs(Some(home.path()));
+    let empty_path = std::ffi::OsString::new();
+    let found = find_executable("codex", Some(&empty_path), &extra).expect("found via nvm");
+    assert!(found.to_string_lossy().contains("v22.3.0"), "{found:?}");
+    assert!(find_executable("definitely-not-installed-cli", Some(&empty_path), &extra).is_none());
+}
+
+#[test]
+fn handoff_eligibility_covers_both_sources_and_expires_after_cutoff() {
+    let now = t("2026-11-26T12:00:00Z");
+    for source in [Tool::ClaudeCode, Tool::Codex] {
+        for (used, age, eligible) in [(89.9, 0, false), (90.0, 120, true), (100.0, 121, false)] {
+            let mut gauge = codex_gauge(now, used, now + Duration::hours(3));
+            gauge.tool = source;
+            let mut eng = engine_with(vec![ev(source, EventKind::Assistant, now - Duration::minutes(age), "s", 0.1)], vec![gauge]);
+            eng.settings.primary_tool = Some(source);
+            let snap = eng.snapshot(now).unwrap();
+            assert_eq!(snap.handoffs.iter().any(|h| h.source == source && h.session == "s"), eligible);
+        }
+    }
+}
+
+#[test]
+fn test_handoff_offers_latest_session_whatever_the_usage() {
+    let now = t("2026-11-26T12:00:00Z");
+    // 20% used: no real offer, but the test offer is there for the latest session.
+    let gauge = codex_gauge(now, 20.0, now + Duration::hours(3));
+    let mut eng = engine_with(
+        vec![
+            ev(Tool::Codex, EventKind::Assistant, now - Duration::hours(5), "old", 0.1),
+            ev(Tool::Codex, EventKind::Assistant, now - Duration::hours(3), "latest", 0.1),
+        ],
+        vec![gauge],
+    );
+    eng.settings.primary_tool = Some(Tool::Codex);
+    assert!(eng.snapshot(now).unwrap().handoffs.is_empty());
+    let offers = eng.test_handoff_offers(now).unwrap();
+    let codex = offers.iter().find(|o| o.source == Tool::Codex).expect("codex offer");
+    assert_eq!(codex.session, "latest");
+    // Nothing older than a day.
+    assert!(eng.test_handoff_offers(now + Duration::hours(25)).unwrap().is_empty());
+}

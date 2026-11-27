@@ -31,6 +31,9 @@ pub struct Engine {
     allowances: HashMap<(Tool, &'static str), (f64, Source)>,
     allowances_at: Option<DateTime<Utc>>,
     audit_cache: Option<(DateTime<Utc>, Vec<AuditResult>, f64)>,
+    /// Where agent hooks report status and approvals (see agent_status.rs).
+    /// None for in-memory test engines.
+    pub status_dir: Option<PathBuf>,
 }
 
 fn basename(p: &Option<String>) -> Option<String> {
@@ -71,6 +74,7 @@ impl Engine {
             allowances: HashMap::new(),
             allowances_at: None,
             audit_cache: None,
+            status_dir: None,
         }
     }
 
@@ -79,7 +83,9 @@ impl Engine {
     }
 
     pub fn open_default() -> Result<Engine> {
-        Self::open(&crate::paths::app_data_dir().join("usage.db"))
+        let mut e = Self::open(&crate::paths::app_data_dir().join("usage.db"))?;
+        e.status_dir = Some(crate::agent_status::dir());
+        Ok(e)
     }
 
     pub fn in_memory() -> Result<Engine> {
@@ -163,6 +169,112 @@ impl Engine {
         }
         self.ingest_live(Tool::ClaudeCode, res);
         Ok(signed_out && !expired && self.settings.alerts.notifications)
+    }
+
+/// The most recent Claude Code or Codex session from the last 24 hours, offered
+    /// whatever the usage. Powers "Test handoff" in Check setup, so the flow can be
+    /// tried without burning a plan limit to 90%.
+    /// Project folders of Claude Code and Codex sessions in the last two weeks,
+    /// most recent first. Used to suggest repositories for handoffs.
+    /// Dispatcher tasks from the last 24 hours and what their sessions are
+    /// doing, matched by folder: each task runs in its own folder (worktree).
+    pub fn agent_runs(&self, now: DateTime<Utc>, recent: &BTreeMap<Tool, Vec<UsageEvent>>) -> Result<Vec<crate::snapshot::AgentRun>> {
+        let sessions = self.status_dir.as_deref().map(|d| crate::agent_status::sessions(d, now)).unwrap_or_default();
+        let mut out = Vec::new();
+        for t in self.store.tasks_since(now - Duration::hours(24))? {
+            let queued = t.queued_until.is_some();
+            let events: Vec<&UsageEvent> = if queued { vec![] } else {
+                recent.get(&t.tool).into_iter().flatten()
+                    .filter(|e| e.ts >= t.created_at - Duration::seconds(10) && e.ts <= now)
+                    .filter(|e| e.project.as_deref().is_some_and(|p| crate::dispatch::same_folder(p, &t.cwd)))
+                    .collect()
+            };
+            let last = events.iter().map(|e| e.ts).max();
+            // What the tool itself last said about this folder, since the task began.
+            let reported = sessions.iter()
+                .filter(|s| s.tool == t.tool && s.at >= t.created_at - Duration::seconds(10) && crate::dispatch::same_folder(&s.cwd, &t.cwd))
+                .max_by_key(|s| s.at);
+            let from_logs = match last {
+                Some(l) if now - l <= Duration::seconds(90) => "working",
+                Some(_) => "idle",
+                None if matches!(t.dest.as_deref(), Some("app" | "web")) => "opened",
+                None if now - t.created_at <= Duration::minutes(5) => "starting",
+                None => "no_activity",
+            };
+            use crate::agent_status::Kind;
+            let state = if queued { "queued" } else {
+                match reported {
+                    // Newer log activity than the report means it's moved on.
+                    Some(r) if last.is_none_or(|l| l <= r.at + Duration::seconds(5)) || r.kind == Kind::NeedsApproval && last.is_some_and(|l| l <= r.at + Duration::seconds(30)) => match r.kind {
+                        Kind::Working => "working",
+                        Kind::NeedsApproval => "needs_approval",
+                        Kind::WaitingInput | Kind::Done => "done",
+                    },
+                    _ => from_logs,
+                }
+            };
+            // A test run left "running" by a closed app isn't running.
+            let verify = match t.verify.as_deref() {
+                Some("running") if t.verify_at.is_some_and(|a| now - a > Duration::minutes(20)) => None,
+                v => v.map(str::to_owned),
+            };
+            // GitHub-only repos are stored as "owner/name".
+            let path = std::path::Path::new(&t.repo);
+            let repo_name = if path.is_absolute() || t.repo.starts_with(['/', '\\']) { path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() } else { t.repo.clone() };
+            out.push(crate::snapshot::AgentRun {
+                id: t.id, tool: t.tool, text: t.text, repo_name, branch: t.branch, cwd: t.cwd, dest: t.dest,
+                started_at: t.created_at, state: state.into(),
+                cost_usd: events.iter().map(|e| e.cost_usd).sum(),
+                requests: events.len() as u64,
+                last_activity_at: last.max(reported.map(|r| r.at)),
+                queued_until: t.queued_until,
+                verify, verify_secs: t.verify_secs, verify_at: t.verify_at,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Tool calls waiting for your OK, from any Claude Code session.
+    pub fn approvals(&self, now: DateTime<Utc>) -> Vec<crate::agent_status::Approval> {
+        self.status_dir.as_deref().map(|d| crate::agent_status::pending(d, now)).unwrap_or_default()
+    }
+
+    pub fn record_task(&self, row: &crate::store::TaskRow) -> Result<i64> {
+        self.store.insert_task(row)
+    }
+
+    pub fn dismiss_task(&self, id: i64) -> Result<()> {
+        self.store.dismiss_task(id)
+    }
+
+    pub fn recent_projects(&self, now: DateTime<Utc>) -> Result<Vec<PathBuf>> {
+        let mut seen: Vec<(DateTime<Utc>, PathBuf)> = Vec::new();
+        for tool in [Tool::ClaudeCode, Tool::Codex] {
+            for e in self.store.events(Some(tool), now - Duration::days(14), now + Duration::seconds(1))? {
+                let Some(p) = e.project.as_deref().map(PathBuf::from).filter(|p| p.is_absolute()) else { continue };
+                match seen.iter_mut().find(|(_, q)| *q == p) {
+                    Some(entry) => entry.0 = entry.0.max(e.ts),
+                    None => seen.push((e.ts, p)),
+                }
+            }
+        }
+        seen.sort_by_key(|e| std::cmp::Reverse(e.0));
+        Ok(seen.into_iter().map(|(_, p)| p).collect())
+    }
+
+    pub fn test_handoff_offers(&self, now: DateTime<Utc>) -> Result<Vec<crate::snapshot::HandoffOffer>> {
+        let mut out = Vec::new();
+        for tool in [Tool::ClaudeCode, Tool::Codex] {
+            if !self.settings.tool(tool).enabled {
+                continue;
+            }
+            let recent = self.store.events(Some(tool), now - Duration::hours(24), now + Duration::seconds(1))?;
+            if let Some(e) = recent.iter().rev().find(|e| e.ts <= now) {
+                let targets = crate::handoff::targets(tool);
+                out.push(crate::snapshot::HandoffOffer { source: tool, session: e.session_id.clone(), targets });
+            }
+        }
+        Ok(out)
     }
 
     pub fn diagnostics(&self, now: DateTime<Utc>) -> Vec<ToolDiagnostics> {
@@ -608,7 +720,11 @@ impl Engine {
 
         let savings: f64 = self.store.savings_since(metrics::month_start_local(now))?.iter().map(|s| s.amount_usd).sum();
 
+        let agents = self.agent_runs(now, &recent_by_tool)?;
         let mut snap = Snapshot {
+            agents,
+            approvals: self.approvals(now),
+            handoffs: vec![],
             gauge_history: vec![],
             idle_hidden: self.settings.onboarded && self.settings.hide_when_idle
                 && !recent_by_tool.values().flatten().any(|e| e.ts > now - Duration::minutes(30))
@@ -651,6 +767,17 @@ impl Engine {
                     }
                     snap.gauge_history.push(point);
                 }
+            }
+        }
+        for t in snap.tools.iter().filter(|t| t.enabled && !t.locked && t.tool != Tool::Gemini) {
+            let near_limit = t.windows.iter().any(|w| matches!(w.key.as_str(), "five_hour" | "weekly")
+                && w.source != Source::Learning && w.headroom_pct <= 10.0);
+            let red = snap.alerts.iter().any(|a| a.tool == t.tool && a.kind == "low_headroom" && a.level == "red");
+            if !near_limit && !red { continue; }
+            if let Some(event) = recent_by_tool[&t.tool].iter().rev()
+                .find(|e| e.ts <= now && e.ts >= now - Duration::hours(2)) {
+                let targets = crate::handoff::targets(t.tool);
+                snap.handoffs.push(crate::snapshot::HandoffOffer { source: t.tool, session: event.session_id.clone(), targets });
             }
         }
         Ok(snap)

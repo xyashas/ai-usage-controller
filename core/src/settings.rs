@@ -68,6 +68,19 @@ pub struct Settings {
     /// Signed in to claude.ai inside the app, so the plan gauge works without Claude Code.
     pub claude_web: bool,
     pub api_base: String,
+    /// Repositories the user added for handoffs, besides the ones found from
+    /// recent sessions. Local only.
+    pub repos: Vec<PathBuf>,
+    /// After opening an app or web page for a task or handoff, paste the prompt
+    /// and press Enter once that window is in front.
+    pub auto_send: bool,
+    /// Claude Code and Codex report when they need you or finish (hooks in
+    /// ~/.claude/settings.json and ~/.codex/config.toml). Turned on from the widget.
+    pub agent_status: bool,
+    /// Allow or deny Claude Code's permission prompts from the widget.
+    pub approvals: bool,
+    /// Run the project's tests when an agent finishes, and show if they passed.
+    pub verify_done: bool,
 }
 
 impl Default for Settings {
@@ -88,6 +101,11 @@ impl Default for Settings {
             live_gauges: true,
             claude_web: false,
             api_base: "https://api.aiusage.dev".into(),
+            repos: vec![],
+            auto_send: true,
+            agent_status: false,
+            approvals: true,
+            verify_done: true,
         }
     }
 }

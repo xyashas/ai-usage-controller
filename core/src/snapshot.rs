@@ -109,8 +109,47 @@ pub struct GaugePoint {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct HandoffOffer {
+    pub source: Tool,
+    pub session: String,
+    pub targets: Vec<Tool>,
+}
+
+/// A task started from the dispatcher, with what its session is doing.
+#[derive(Clone, Debug, Serialize)]
+pub struct AgentRun {
+    pub id: i64,
+    pub tool: Tool,
+    pub text: String,
+    pub repo_name: String,
+    pub branch: Option<String>,
+    pub cwd: String,
+    pub started_at: DateTime<Utc>,
+    /// "starting" (no activity yet), "working" (active in the last 90 s),
+    /// "idle" (quiet for a while), "done" (the tool says it finished its turn),
+    /// "needs_approval" (waiting for you to allow a tool), "no_activity" (never
+    /// started), "opened" (handed to an app or the web; not tracked from here),
+    /// "queued" (waiting for its tool's limit to reset).
+    pub state: String,
+    /// "terminal", "app" or "web".
+    pub dest: Option<String>,
+    pub cost_usd: f64,
+    pub requests: u64,
+    pub last_activity_at: Option<DateTime<Utc>>,
+    pub queued_until: Option<DateTime<Utc>>,
+    /// Last test run: "running", "passed", "failed", "timed_out" or "error".
+    pub verify: Option<String>,
+    pub verify_secs: Option<f64>,
+    pub verify_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub generated_at: DateTime<Utc>,
+    /// Dispatcher tasks from the last 24 hours, newest first.
+    pub agents: Vec<AgentRun>,
+    pub approvals: Vec<crate::agent_status::Approval>,
+    pub handoffs: Vec<HandoffOffer>,
     pub gauge_history: Vec<GaugePoint>,
     pub idle_hidden: bool,
     pub onboarded: bool,

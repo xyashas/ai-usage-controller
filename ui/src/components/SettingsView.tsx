@@ -49,10 +49,10 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-3 p-3">
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-1 text-[12px] text-muted hover:text-fg"><BackIcon /> Back</button>
-        <span className="rounded-full bg-fg/[0.06] px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-wider text-muted">{snap.entitlements.tier}</span>
+        <button onClick={onBack} className="btn btn-ghost !pl-1.5"><BackIcon /> Back</button>
+        <span className="rounded-full bg-white/[0.08] px-2.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted">{snap.entitlements.tier}</span>
       </div>
 
       <Section title="Claude account">
@@ -69,10 +69,27 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         ) : (
           <div className="space-y-2">
             <p className="text-[11.5px] leading-relaxed text-muted">Shows the same plan limits as claude.ai. Needed if you use claude.ai or the Claude desktop app.</p>
-            <button onClick={() => api.connectClaude()} className="w-full rounded-full bg-fg py-1.5 text-[12.5px] font-semibold text-canvas hover:bg-fg/90">Connect Claude account</button>
+            <button onClick={() => api.connectClaude()} className="btn btn-primary w-full">Connect Claude account</button>
           </div>
         )}
-        <button onClick={onSetup} className="text-left text-[12px] text-accent hover:underline">Check setup and test the numbers →</button>
+        <button onClick={onSetup} className="text-left text-[12px] text-fg underline-offset-2 hover:underline">Check setup and test the numbers →</button>
+      </Section>
+
+      <Section title="Agents">
+        <Toggle label="Agent status" on={s.agent_status} set={async (v) => {
+          setSaveError("");
+          try { await api.setAgentStatus(v, s.approvals); setS({ ...s, agent_status: v }); }
+          catch (e) { setSaveError(String(e)); }
+        }} />
+        <p className="text-[11px] leading-relaxed text-muted">Claude Code and Codex tell the widget when they finish or need you. Adds a hook to their settings; only the folder and the event are recorded.</p>
+        {s.agent_status && <Toggle label="Approve Claude Code's requests from the widget" on={s.approvals} set={(v) => update({ ...s, approvals: v })} />}
+        <Toggle label="Run tests when an agent finishes" on={s.verify_done} set={(v) => update({ ...s, verify_done: v })} />
+        <p className="text-[11px] leading-relaxed text-muted">Runs the project's tests in the task's folder (cargo, npm, pnpm, go, pytest, make, or the command in <code className="text-fg">.aiuc/verify</code>) and shows whether they pass.</p>
+        <Toggle label="Paste and send tasks automatically" on={s.auto_send} set={(v) => update({ ...s, auto_send: v })} />
+        <p className="text-[11px] leading-relaxed text-muted">
+          When a task or handoff opens in an app or the web, the widget pastes it and presses Enter once that window is in front. It never types into any other window.
+          {navigator.userAgent.includes("Mac") ? " On a Mac, allow AI Usage Controller under System Settings → Privacy & Security → Accessibility." : ""}
+        </p>
       </Section>
 
       <Section title="Tools & plans">
@@ -80,7 +97,7 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
           <div key={t} className="flex items-center gap-2">
             <input aria-label={`Track ${label}`} onFocus={() => api.focus()} type="checkbox" checked={s.tools[t].enabled} onChange={(e) => tool(t, { enabled: e.target.checked })} />
             <span className="flex w-24 items-center gap-2 text-[13px]"><ToolMark tool={t} />{label}</span>
-            <select aria-label={`${label} plan`} value={s.tools[t].plan_id ?? ""} onChange={(e) => tool(t, { plan_id: e.target.value || null })} className="min-w-0 flex-1 rounded-md bg-fg/[0.06] px-2 py-1 text-[12px] ring-1 ring-fg/[0.08]">
+            <select aria-label={`${label} plan`} value={s.tools[t].plan_id ?? ""} onChange={(e) => tool(t, { plan_id: e.target.value || null })} className="min-w-0 flex-1 rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25">
               <option value="">Not sure</option>
               {plans[t].map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
@@ -89,7 +106,7 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         {!paid && (
           <label className="flex items-center gap-2 text-[12px] text-muted">
             Free tracks one tool:
-            <select value={s.primary_tool ?? ""} onChange={(e) => update({ ...s, primary_tool: (e.target.value || null) as Tool | null })} className="rounded-md bg-fg/[0.06] px-2 py-1 ring-1 ring-fg/[0.08]">
+            <select value={s.primary_tool ?? ""} onChange={(e) => update({ ...s, primary_tool: (e.target.value || null) as Tool | null })} className="rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none ring-1 ring-white/[0.06] focus:ring-white/25">
               {TOOLS.map((t) => <option key={t.tool} value={t.tool}>{t.label}</option>)}
             </select>
           </label>
@@ -98,16 +115,16 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
 
       <Section title="Alerts">
         <Row label="Amber warning at % used">
-          <input onFocus={() => api.focus()} type="number" min={10} max={99} disabled={!paid} value={100 - s.alerts.amber_pct} onChange={(e) => update({ ...s, alerts: { ...s.alerts, amber_pct: 100 - Number(e.target.value) } })} className="w-16 rounded-md bg-fg/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-fg/[0.08] disabled:opacity-40" />
+          <input onFocus={() => api.focus()} type="number" min={10} max={99} disabled={!paid} value={100 - s.alerts.amber_pct} onChange={(e) => update({ ...s, alerts: { ...s.alerts, amber_pct: 100 - Number(e.target.value) } })} className="w-16 rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-right text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25 disabled:opacity-40" />
         </Row>
         <Row label="Red warning at % used">
-          <input onFocus={() => api.focus()} type="number" min={50} max={99} disabled={!paid} value={100 - s.alerts.red_pct} onChange={(e) => update({ ...s, alerts: { ...s.alerts, red_pct: 100 - Number(e.target.value) } })} className="w-16 rounded-md bg-fg/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-fg/[0.08] disabled:opacity-40" />
+          <input onFocus={() => api.focus()} type="number" min={50} max={99} disabled={!paid} value={100 - s.alerts.red_pct} onChange={(e) => update({ ...s, alerts: { ...s.alerts, red_pct: 100 - Number(e.target.value) } })} className="w-16 rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-right text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25 disabled:opacity-40" />
         </Row>
         <Toggle label="Runaway-loop alerts" on={s.alerts.runaway_alerts} set={(v) => update({ ...s, alerts: { ...s.alerts, runaway_alerts: v } })} />
         <Toggle label="One-click Stop (beta)" on={s.alerts.one_click_stop} set={(v) => update({ ...s, alerts: { ...s.alerts, one_click_stop: v } })} />
         <Toggle label="System notifications" on={s.alerts.notifications} set={(v) => update({ ...s, alerts: { ...s.alerts, notifications: v } })} />
         <Toggle label="Also read limits via the Claude Code login" on={s.live_gauges} set={(v) => update({ ...s, live_gauges: v })} />
-        {!paid && <button onClick={onPaywall} className="text-left text-[12px] text-accent">Custom alert levels are Pro →</button>}
+        {!paid && <button onClick={onPaywall} className="text-left text-[12px] text-fg underline-offset-2">Custom alert levels are Pro →</button>}
       </Section>
 
       <Section title="Widget">
@@ -116,7 +133,7 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         {saveError && <p role="alert" className="text-xs text-bad">{saveError}</p>}
 
         <Row label="Open panel">
-          <input onFocus={() => api.focus()} value={s.hotkey} onChange={(e) => update({ ...s, hotkey: e.target.value })} className="w-28 rounded-md bg-fg/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-fg/[0.08]" />
+          <input onFocus={() => api.focus()} value={s.hotkey} onChange={(e) => update({ ...s, hotkey: e.target.value })} className="w-28 rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-right text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25" />
         </Row>
       </Section>
 
@@ -129,12 +146,12 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
           </div>
         ) : (
           <div className="space-y-2">
-            <input onFocus={() => api.focus()} placeholder="Server (https://api.aiusage.dev)" value={invite.server} onChange={(e) => setInvite({ ...invite, server: e.target.value })} className="w-full rounded-md bg-fg/[0.06] px-2 py-1 text-[12px] ring-1 ring-fg/[0.08]" />
+            <input onFocus={() => api.focus()} placeholder="Server (https://api.aiusage.dev)" value={invite.server} onChange={(e) => setInvite({ ...invite, server: e.target.value })} className="w-full rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25" />
             <div className="flex gap-1.5">
-              <input onFocus={() => api.focus()} placeholder="Invite code" value={invite.code} onChange={(e) => setInvite({ ...invite, code: e.target.value })} className="min-w-0 flex-1 rounded-md bg-fg/[0.06] px-2 py-1 text-[12px] ring-1 ring-fg/[0.08]" />
-              <input onFocus={() => api.focus()} placeholder="Your email" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} className="min-w-0 flex-1 rounded-md bg-fg/[0.06] px-2 py-1 text-[12px] ring-1 ring-fg/[0.08]" />
+              <input onFocus={() => api.focus()} placeholder="Invite code" value={invite.code} onChange={(e) => setInvite({ ...invite, code: e.target.value })} className="min-w-0 flex-1 rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25" />
+              <input onFocus={() => api.focus()} placeholder="Your email" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} className="min-w-0 flex-1 rounded-[10px] bg-white/[0.07] px-2.5 py-1.5 outline-none text-[12px] ring-1 ring-white/[0.06] focus:ring-white/25" />
             </div>
-            <button disabled={!invite.server || !invite.code} onClick={join} className="w-full rounded-md bg-fg/10 py-1.5 text-[12px] disabled:opacity-40">Join team or sync group</button>
+            <button disabled={!invite.server || !invite.code} onClick={join} className="btn w-full">Join team or sync group</button>
             {syncMsg && <p className="text-[11.5px] text-muted">{syncMsg}</p>}
           </div>
         )}
@@ -144,13 +161,13 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         {paid && snap.entitlements.tier !== "trial" ? (
           <button onClick={async () => { await api.deactivate(); }} className="text-left text-[12px] text-muted hover:text-fg">Deactivate on this device</button>
         ) : (
-          <button onClick={onPaywall} className="text-left text-[12px] text-accent">Upgrade or enter a licence key →</button>
+          <button onClick={onPaywall} className="text-left text-[12px] text-fg underline-offset-2">Upgrade or enter a licence key →</button>
         )}
       </Section>
 
-      <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto flex gap-2 bg-canvas px-4 pb-4 pt-3">
-        <button onClick={save} className="flex-1 rounded-full bg-fg py-2 text-[13px] font-semibold text-canvas hover:bg-fg/90">{saved ? "Saved ✓" : "Save"}</button>
-        <button onClick={() => api.quit()} className="rounded-full bg-fg/[0.06] px-4 text-[12px] text-muted hover:text-fg">Quit</button>
+      <div className="sticky bottom-0 -mx-3 -mb-3 mt-auto flex gap-2 bg-black px-3 pb-3 pt-3">
+        <button onClick={save} className="btn btn-primary flex-1 !py-2">{saved ? "Saved ✓" : "Save"}</button>
+        <button onClick={() => api.quit()} className="btn btn-ghost">Quit</button>
       </div>
     </div>
   );
@@ -158,9 +175,9 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-2 border-t border-fg/[0.06] pt-3 first-of-type:border-0 first-of-type:pt-0">
-      <h3 className="text-[10.5px] font-medium uppercase tracking-wider text-muted">{title}</h3>
-      {children}
+    <section className="space-y-1.5">
+      <h3 className="eyebrow px-1">{title}</h3>
+      <div className="tile space-y-2.5">{children}</div>
     </section>
   );
 }
@@ -178,8 +195,8 @@ function Toggle({ label, on, set }: { label: string; on: boolean; set: (v: boole
   return (
     <button role="switch" aria-checked={on} onClick={() => set(!on)} className="flex w-full items-center justify-between text-[12.5px]">
       <span>{label}</span>
-      <span className={`flex h-4 w-7 items-center rounded-full px-0.5 transition-colors duration-150 ${on ? "bg-accent" : "bg-fg/15"}`}>
-        <span className={`h-3 w-3 rounded-full bg-fg transition-transform duration-150 ${on ? "translate-x-3" : ""}`} />
+      <span className={`flex h-[18px] w-8 shrink-0 items-center rounded-full px-0.5 transition-colors duration-150 ${on ? "bg-[#34c759]" : "bg-white/15"}`}>
+        <span className={`h-[14px] w-[14px] rounded-full bg-white shadow transition-transform duration-200 ${on ? "translate-x-[14px]" : ""}`} />
       </span>
     </button>
   );
