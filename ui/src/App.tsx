@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { HandoffPreview, type Draft } from "./components/HandoffPreview";
 import type { HandoffOffer, RepoStatus, Tool, Snapshot } from "./types";
 import { HandoffHub } from "./components/HandoffHub";
@@ -7,11 +7,11 @@ import { AskView } from "./components/AskView";
 import { api, inTauri, onHover, onOpenView, onSnapshot, onToggle } from "./api";
 import { Collapsed } from "./components/Collapsed";
 import { Expanded } from "./components/Expanded";
-import { Paywall } from "./components/Paywall";
-import { AuditCard } from "./components/AuditCard";
 import { SettingsView } from "./components/SettingsView";
-import { Onboarding } from "./components/Onboarding";
-import { CheckSetup } from "./components/CheckSetup";
+const Paywall = lazy(() => import("./components/Paywall").then((m) => ({ default: m.Paywall })));
+const AuditCard = lazy(() => import("./components/AuditCard").then((m) => ({ default: m.AuditCard })));
+const Onboarding = lazy(() => import("./components/Onboarding").then((m) => ({ default: m.Onboarding })));
+const CheckSetup = lazy(() => import("./components/CheckSetup").then((m) => ({ default: m.CheckSetup })));
 import { SuggestionChip } from "./components/SuggestionChip";
 
 export type View = "panel" | "ask" | "agents" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
@@ -116,6 +116,11 @@ export default function App() {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (viewRef.current !== "panel" && viewRef.current !== "onboarding") {
+          setDraft(null);
+          setView("panel");
+          return;
+        }
         setOpen(false);
         requestAnimationFrame(() => surfaceRef.current?.querySelector<HTMLButtonElement>(".pill-layer button")?.focus({ preventScroll: true }));
       }
@@ -259,6 +264,7 @@ export default function App() {
             style={{ width: PANEL_W, maxHeight: MAX_H, opacity: open ? 1 : 0 }}
           >
             <div ref={innerRef} style={{ paddingTop: mac ? notch : 0 }}>
+            <Suspense fallback={null}>
             {view === "handoff" && draft ? (
               <HandoffPreview draft={draft} onBack={() => { setDraft(null); setView(backTo.current === "handoff" ? "panel" : backTo.current); }} />
             ) : view === "ask" ? (
@@ -285,6 +291,7 @@ export default function App() {
             ) : (
               <Expanded onHandoff={preview} onRepoHandoff={previewRepo} snap={snap} onView={goto} refresh={refresh} />
             )}
+            </Suspense>
             </div>
           </div>
         )}

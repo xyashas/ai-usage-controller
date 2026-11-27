@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Snapshot, WeeklyRecap } from "../types";
 import { ToolMark } from "./ToolMark";
 import { tint } from "../theme";
@@ -6,7 +7,7 @@ import { usd } from "../format";
 const DAY = 86_400_000;
 
 /** The last 24 hours of the live gauge, as a soft area under a line. */
-export function UsageHistory({ points, end, color = "currentColor" }: { points: Snapshot["gauge_history"]; end: number; color?: string }) {
+export const UsageHistory = memo(function UsageHistory({ points, end, color = "currentColor" }: { points: Snapshot["gauge_history"]; end: number; color?: string }) {
   const recent = points.filter((p) => p.at > end - DAY);
   if (recent.length < 2) return null;
   const x = (at: number) => Math.max(0, Math.min(320, (320 * (at - end + DAY)) / DAY));
@@ -34,7 +35,7 @@ export function UsageHistory({ points, end, color = "currentColor" }: { points: 
       <figcaption className="flex justify-between text-[10px] opacity-45"><span>24h ago</span><span>now</span></figcaption>
     </figure>
   );
-}
+});
 
 function formatHour(h: number): string {
   const hour12 = h % 12 === 0 ? 12 : h % 12;
@@ -50,7 +51,7 @@ function deltaLabel(pct: number | null, hasThisWeek: boolean): { text: string; c
 }
 
 /** Glanceable weekly recap: this week vs last week, busiest hours, limit hits & handoffs. */
-export function WeeklyRecapSection({ recap }: { recap: WeeklyRecap }) {
+export const WeeklyRecapSection = memo(function WeeklyRecapSection({ recap }: { recap: WeeklyRecap }) {
   const hasData = recap.tools.length > 0 || recap.handoffs_count > 0 || recap.total_limit_hits > 0;
   if (!hasData) return null;
 
@@ -124,4 +125,4 @@ export function WeeklyRecapSection({ recap }: { recap: WeeklyRecap }) {
       )}
     </section>
   );
-}
+});

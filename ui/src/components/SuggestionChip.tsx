@@ -82,6 +82,7 @@ export function SuggestionChip({ snap, open, top }: { snap: Snapshot; open: bool
       <button
         type="button"
         aria-label="Dismiss suggestion"
+        title="Dismiss"
         onClick={() => setActive(null)}
         className="icon-btn -mr-1 !h-5 !w-5"
       >
