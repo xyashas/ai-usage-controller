@@ -11,6 +11,7 @@
 //! which never leaves the machine.
 
 pub mod advice;
+pub mod agent_status;
 pub mod dispatch;
 pub mod engine;
 pub mod github;
@@ -32,6 +33,7 @@ pub mod snapshot;
 pub mod stop;
 pub mod store;
 pub mod sync;
+pub mod verify;
 
 pub use engine::Engine;
 pub use model::{Tool, UsageEvent};

@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Alert, Dest, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
+import type { Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -18,7 +18,12 @@ export const api = {
   testHandoffOffers: () => call<HandoffOffer[]>("test_handoff_offers"),
   launchHandoff: (id: number, prompt: string, dest: Dest) => call<string>("launch_handoff", { id, prompt, dest }),
   planDispatch: (text: string, repo: string | null) => call<DispatchPlan>("plan_dispatch", { text, repo }),
-  runDispatch: (repo: string, tasks: { text: string; tool: Tool; dest: Dest }[], worktrees: boolean) => call<Started[]>("run_dispatch", { repo, tasks, worktrees }),
+  runDispatch: (repo: string, tasks: { text: string; tool: Tool; dest: Dest; queue?: boolean }[], worktrees: boolean) => call<Started[]>("run_dispatch", { repo, tasks, worktrees }),
+  runQueued: (id: number, tool?: Tool) => call<string>("run_queued", { id, tool: tool ?? null }),
+  setAgentStatus: (on: boolean, approvals?: boolean) => call<InstallResult>("set_agent_status", { on, approvals: approvals ?? null }),
+  answerApproval: (id: string, answer: ApprovalAnswer) => call<void>("answer_approval", { id, answer }),
+  verifyTask: (id: number) => call<void>("verify_task", { id }),
+  verifyOutput: (id: number) => call<string | null>("verify_output", { id }),
   githubStatus: () => call<GithubStatus>("github_status"),
   githubConnect: (token?: string) => call<string>("github_connect", { token: token ?? null }),
   githubDeviceStart: () => call<DeviceCode>("github_device_start"),
@@ -112,14 +117,24 @@ let mockSettings: Settings = {
   claude_web: mockScenario === "connected",
   api_base: "https://api.aiusage.dev",
   auto_send: true,
+  agent_status: mockScenario !== "unconnected",
+  approvals: true,
+  verify_done: true,
 };
 const dismissed = new Set<string>();
 let mockGithub: string | null = null;
+const extra = { queued_until: null, verify: null, verify_secs: null, verify_at: null } as const;
 const mockAgents: Snapshot["agents"] = mockScenario === "empty" ? [] : [
-  { id: 3, tool: "codex", text: "Fix the failing checkout test", repo_name: "acme-web", branch: "agents/fix-failing-checkout-test", cwd: "", started_at: inMin(-6), state: "working", dest: "terminal", cost_usd: 0.42, requests: 18, last_activity_at: inMin(0) },
-  { id: 2, tool: "claude_code", text: "Update the docs for the new coupon API", repo_name: "acme-web", branch: "agents/update-docs-new-coupon-api", cwd: "", started_at: inMin(-6), state: "idle", dest: "terminal", cost_usd: 1.18, requests: 26, last_activity_at: inMin(-2) },
-  { id: 1, tool: "gemini", text: "Summarise open issues labelled bug", repo_name: "acme-api", branch: null, cwd: "", started_at: inMin(-1), state: "opened", dest: "web", cost_usd: 0, requests: 0, last_activity_at: null },
+  { ...extra, id: 5, tool: "claude_code", text: "Add rate limiting to the coupon endpoint", repo_name: "acme-api", branch: "agents/rate-limit-coupons", cwd: "", started_at: inMin(-3), state: "queued", dest: "terminal", cost_usd: 0, requests: 0, last_activity_at: null, queued_until: inMin(132) },
+  { ...extra, id: 4, tool: "claude_code", text: "Migrate the orders table to the new schema", repo_name: "acme-api", branch: "agents/migrate-orders", cwd: "", started_at: inMin(-9), state: "needs_approval", dest: "terminal", cost_usd: 0.61, requests: 9, last_activity_at: inMin(0) },
+  { ...extra, id: 3, tool: "codex", text: "Fix the failing checkout test", repo_name: "acme-web", branch: "agents/fix-failing-checkout-test", cwd: "", started_at: inMin(-6), state: "working", dest: "terminal", cost_usd: 0.42, requests: 18, last_activity_at: inMin(0) },
+  { ...extra, id: 2, tool: "claude_code", text: "Update the docs for the new coupon API", repo_name: "acme-web", branch: "agents/update-docs-new-coupon-api", cwd: "", started_at: inMin(-26), state: "done", dest: "terminal", cost_usd: 1.18, requests: 26, last_activity_at: inMin(-2), verify: "passed", verify_secs: 41, verify_at: inMin(-1) },
+  { ...extra, id: 6, tool: "codex", text: "Remove the legacy cart code", repo_name: "acme-web", branch: "agents/remove-legacy-cart", cwd: "", started_at: inMin(-40), state: "done", dest: "terminal", cost_usd: 0.88, requests: 14, last_activity_at: inMin(-12), verify: "failed", verify_secs: 63, verify_at: inMin(-11) },
+  { ...extra, id: 1, tool: "gemini", text: "Summarise open issues labelled bug", repo_name: "acme-api", branch: null, cwd: "", started_at: inMin(-1), state: "opened", dest: "web", cost_usd: 0, requests: 0, last_activity_at: null },
 ];
+const mockApprovals: Snapshot["approvals"] = mockScenario === "approval" ? [
+  { id: "a1", tool: "claude_code", session: "s", cwd: "/dev/acme-api.agents/migrate-orders", repo_name: "migrate-orders", tool_name: "Bash", summary: "npx prisma migrate dev --name orders_v2", at: inMin(0) },
+] : [];
 const mockRepos: RepoStatus[] = mockScenario === "empty" ? [] : [
   { id: "/Users/you/dev/acme-web", local: true, root: "/Users/you/dev/acme-web", name: "acme/web", set_up: true, current_branch: "main", github: "https://github.com/acme/web",
     latest: { branch: "claude/fix-login", updated_at: Date.now() / 1000 - 760, origin: "commit", content: "# Handoff" } },
@@ -168,6 +183,7 @@ function mockSnapshot(): Snapshot {
     alerts.push({ id: `low:${claudeLeft <= 5 ? "red" : "amber"}`, level: claudeLeft <= 5 ? "red" : "amber", kind: "low_headroom", tool: "claude_code", message: `Claude 5-hour limit ${Math.round(100 - claudeLeft)}% used, about 20 min left at this pace`, action: paid ? { kind: "switch", label: "Switch to Codex", target_tool: "codex" } : { kind: "dismiss", label: "Dismiss", target_tool: null }, session_id: null, project: null, burn_usd_per_min: null });
   return {
     agents: mockAgents.filter((a) => !dismissed.has(`agent:${a.id}`)),
+    approvals: mockApprovals.filter((a) => !dismissed.has(`approval:${a.id}`)),
     handoffs: mockScenario === "critical" ? [{ source: "claude_code", session: "s", targets: ["codex", "gemini"] }] : [],
     gauge_history: ["empty", "learning", "unconnected"].includes(mockScenario) ? [] : Array.from({length: 97}, (_, i) => ({
       at: stamp - (96 - i) * 900000, used: i === 96 ? 100 - claudeLeft : (i % 20) * 4,
@@ -225,9 +241,9 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     case "list_repos": return mockGithub ? [...mockRepos, ...mockRemote] : mockRepos;
     case "plan_dispatch": {
       const rooms = [
-        { tool: "claude_code", ready: true, used_pct: 64, active: true },
-        { tool: "codex", ready: true, used_pct: 24, active: false },
-        { tool: "gemini", ready: true, used_pct: 9, active: false },
+        { tool: "claude_code", ready: true, used_pct: mockScenario === "critical" ? 100 : 64, active: true, resets_at: inMin(132) },
+        { tool: "codex", ready: true, used_pct: 24, active: false, resets_at: inMin(201) },
+        { tool: "gemini", ready: true, used_pct: 9, active: false, resets_at: inMin(600) },
       ] as const;
       const names: Record<string, Tool> = { claude: "claude_code", codex: "codex", gemini: "gemini" };
       const parts = String(args!.text).split(/\n|;|,?\s+(?:and|then)\s+(?=(?:have |ask |use )?(?:claude|codex|gemini)\b)/i).map((p) => p.trim()).filter(Boolean);
@@ -242,7 +258,12 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       const app = (label: string) => [{ dest: "app", label }, ...(local ? [{ dest: "terminal", label: "Terminal" }] : []), { dest: "web", label: "Web" }];
       return { tasks, rooms, dests: { claude_code: app("Claude app"), codex: app("ChatGPT app"), gemini: [...(local ? [{ dest: "terminal", label: "Terminal" }] : []), { dest: "web", label: "Web" }] } };
     }
-    case "run_dispatch": return (args!.tasks as { text: string; tool: Tool; dest: Dest }[]).map((t) => ({ ...t, branch: args!.worktrees && t.dest !== "web" ? "agents/x" : null, message: t.dest === "terminal" ? "Started in a terminal" : t.dest === "app" ? "Sent in the app" : "Sent in the browser", delivered: true, error: null }));
+    case "run_dispatch": return (args!.tasks as { text: string; tool: Tool; dest: Dest; queue?: boolean }[]).map((t) => ({ ...t, branch: args!.worktrees && t.dest !== "web" && !t.queue ? "agents/x" : null, message: t.queue ? "Queued. Sends when Claude Code resets at 4:12 PM" : t.dest === "terminal" ? "Started in a terminal" : t.dest === "app" ? "Sent in the app" : "Sent in the browser", delivered: true, error: null }));
+    case "answer_approval": dismissed.add(`approval:${args!.id}`); return null;
+    case "run_queued": { const a = mockAgents.find((x) => x.id === args!.id); if (a) { a.state = "starting"; a.queued_until = null; if (args!.tool) a.tool = args!.tool as Tool; } return "Started in a terminal"; }
+    case "verify_task": { const a = mockAgents.find((x) => x.id === args!.id); if (a) a.verify = "running"; return null; }
+    case "verify_output": return "$ npm test\n\n  FAIL  src/cart/legacy.test.ts\n  ● removes old cart › keeps saved items\n\n    expect(received).toHaveLength(expected)\n    Expected length: 2\n    Received length: 0\n\nTests: 1 failed, 46 passed, 47 total";
+    case "set_agent_status": mockSettings.agent_status = !!args!.on; return { claude: true, codex: true, codex_busy: false };
     case "github_status": return { login: mockGithub, cli: !mockGithub, device_flow: true };
     case "github_connect": mockGithub = "you"; return "you";
     case "github_device_start": return { device_code: "d", user_code: "WDJB-MJHT", verification_uri: "https://github.com/login/device", interval: 5 };

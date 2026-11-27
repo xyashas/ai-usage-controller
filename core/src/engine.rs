@@ -31,6 +31,9 @@ pub struct Engine {
     allowances: HashMap<(Tool, &'static str), (f64, Source)>,
     allowances_at: Option<DateTime<Utc>>,
     audit_cache: Option<(DateTime<Utc>, Vec<AuditResult>, f64)>,
+    /// Where agent hooks report status and approvals (see agent_status.rs).
+    /// None for in-memory test engines.
+    pub status_dir: Option<PathBuf>,
 }
 
 fn basename(p: &Option<String>) -> Option<String> {
@@ -71,6 +74,7 @@ impl Engine {
             allowances: HashMap::new(),
             allowances_at: None,
             audit_cache: None,
+            status_dir: None,
         }
     }
 
@@ -79,7 +83,9 @@ impl Engine {
     }
 
     pub fn open_default() -> Result<Engine> {
-        Self::open(&crate::paths::app_data_dir().join("usage.db"))
+        let mut e = Self::open(&crate::paths::app_data_dir().join("usage.db"))?;
+        e.status_dir = Some(crate::agent_status::dir());
+        Ok(e)
     }
 
     pub fn in_memory() -> Result<Engine> {
@@ -173,19 +179,44 @@ impl Engine {
     /// Dispatcher tasks from the last 24 hours and what their sessions are
     /// doing, matched by folder: each task runs in its own folder (worktree).
     pub fn agent_runs(&self, now: DateTime<Utc>, recent: &BTreeMap<Tool, Vec<UsageEvent>>) -> Result<Vec<crate::snapshot::AgentRun>> {
+        let sessions = self.status_dir.as_deref().map(|d| crate::agent_status::sessions(d, now)).unwrap_or_default();
         let mut out = Vec::new();
         for t in self.store.tasks_since(now - Duration::hours(24))? {
-            let events: Vec<&UsageEvent> = recent.get(&t.tool).into_iter().flatten()
-                .filter(|e| e.ts >= t.created_at - Duration::seconds(10) && e.ts <= now)
-                .filter(|e| e.project.as_deref().is_some_and(|p| crate::dispatch::same_folder(p, &t.cwd)))
-                .collect();
+            let queued = t.queued_until.is_some();
+            let events: Vec<&UsageEvent> = if queued { vec![] } else {
+                recent.get(&t.tool).into_iter().flatten()
+                    .filter(|e| e.ts >= t.created_at - Duration::seconds(10) && e.ts <= now)
+                    .filter(|e| e.project.as_deref().is_some_and(|p| crate::dispatch::same_folder(p, &t.cwd)))
+                    .collect()
+            };
             let last = events.iter().map(|e| e.ts).max();
-            let state = match last {
+            // What the tool itself last said about this folder, since the task began.
+            let reported = sessions.iter()
+                .filter(|s| s.tool == t.tool && s.at >= t.created_at - Duration::seconds(10) && crate::dispatch::same_folder(&s.cwd, &t.cwd))
+                .max_by_key(|s| s.at);
+            let from_logs = match last {
                 Some(l) if now - l <= Duration::seconds(90) => "working",
                 Some(_) => "idle",
                 None if matches!(t.dest.as_deref(), Some("app" | "web")) => "opened",
                 None if now - t.created_at <= Duration::minutes(5) => "starting",
                 None => "no_activity",
+            };
+            use crate::agent_status::Kind;
+            let state = if queued { "queued" } else {
+                match reported {
+                    // Newer log activity than the report means it's moved on.
+                    Some(r) if last.is_none_or(|l| l <= r.at + Duration::seconds(5)) || r.kind == Kind::NeedsApproval && last.is_some_and(|l| l <= r.at + Duration::seconds(30)) => match r.kind {
+                        Kind::Working => "working",
+                        Kind::NeedsApproval => "needs_approval",
+                        Kind::WaitingInput | Kind::Done => "done",
+                    },
+                    _ => from_logs,
+                }
+            };
+            // A test run left "running" by a closed app isn't running.
+            let verify = match t.verify.as_deref() {
+                Some("running") if t.verify_at.is_some_and(|a| now - a > Duration::minutes(20)) => None,
+                v => v.map(str::to_owned),
             };
             // GitHub-only repos are stored as "owner/name".
             let path = std::path::Path::new(&t.repo);
@@ -195,10 +226,17 @@ impl Engine {
                 started_at: t.created_at, state: state.into(),
                 cost_usd: events.iter().map(|e| e.cost_usd).sum(),
                 requests: events.len() as u64,
-                last_activity_at: last,
+                last_activity_at: last.max(reported.map(|r| r.at)),
+                queued_until: t.queued_until,
+                verify, verify_secs: t.verify_secs, verify_at: t.verify_at,
             });
         }
         Ok(out)
+    }
+
+    /// Tool calls waiting for your OK, from any Claude Code session.
+    pub fn approvals(&self, now: DateTime<Utc>) -> Vec<crate::agent_status::Approval> {
+        self.status_dir.as_deref().map(|d| crate::agent_status::pending(d, now)).unwrap_or_default()
     }
 
     pub fn record_task(&self, row: &crate::store::TaskRow) -> Result<i64> {
@@ -685,6 +723,7 @@ impl Engine {
         let agents = self.agent_runs(now, &recent_by_tool)?;
         let mut snap = Snapshot {
             agents,
+            approvals: self.approvals(now),
             handoffs: vec![],
             gauge_history: vec![],
             idle_hidden: self.settings.onboarded && self.settings.hide_when_idle

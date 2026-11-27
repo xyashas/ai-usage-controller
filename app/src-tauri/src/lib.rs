@@ -1,3 +1,4 @@
+mod agents;
 mod autosend;
 mod claude_web;
 mod dispatch;
@@ -364,8 +365,14 @@ fn save_settings(app: AppHandle, state: State<AppState>, mut settings: Settings)
         settings.claude_web = eng.settings.claude_web;
         // Repos are managed from the Handoff tab, not the settings form.
         settings.repos = eng.settings.repos.clone();
+        // Agent status installs hooks, so it changes through its own command.
+        settings.agent_status = eng.settings.agent_status;
+        let approvals_changed = settings.approvals != eng.settings.approvals;
         eng.settings = settings.clone();
         eng.save_settings().map_err(err)?;
+        if approvals_changed && settings.agent_status {
+            if let Ok(exe) = std::env::current_exe() { let _ = aiuc_core::agent_status::install(&exe, settings.approvals); }
+        }
         old
     };
     if old_hotkey != settings.hotkey {
@@ -622,6 +629,8 @@ fn update_tray(app: &AppHandle, snap: &Snapshot, tray_state: &mut Option<(String
 fn spawn_worker(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Option<Snapshot>>>) {
     std::thread::spawn(move || {
         let mut tray_state = None;
+        let mut ticker = agents::Ticker::default();
+        agents::refresh_hooks(&engine);
         let mut notified: HashSet<String> = HashSet::new();
         let mut last_live = Instant::now() - LIVE_EVERY;
         let mut last_sync = Instant::now() - SYNC_EVERY;
@@ -700,6 +709,8 @@ fn spawn_worker(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Opti
                         notify(&app, title, &a.message);
                     }
                 }
+                ticker.poll();
+                ticker.tick(&app, &engine, &snap);
                 let _ = app.emit("snapshot", &snap);
                 if let Ok(mut l) = last.lock() {
                     *l = Some(snap);
@@ -737,6 +748,8 @@ async fn tokio_sleep(d: CDuration) {
 fn _keep(_: CDuration) {}
 
 // ---------------- app ----------------
+
+pub use agents::hook_main;
 
 pub fn run() {
     let engine = Engine::open_default().expect("open usage database");
@@ -801,6 +814,11 @@ pub fn run() {
             dispatch::run_dispatch,
             dispatch::dismiss_agent,
             dispatch::start_dictation,
+            dispatch::run_queued,
+            agents::set_agent_status,
+            agents::answer_approval,
+            agents::verify_task,
+            agents::verify_output,
             get_settings,
             save_settings,
             get_plans,

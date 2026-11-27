@@ -138,6 +138,14 @@ export default function App() {
     }
   }, [snap, view, setOpen]);
 
+  // A tool asking for your OK pops the panel open, once per request.
+  const seenApprovals = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = snap?.approvals.filter((a) => !seenApprovals.current.has(a.id)) ?? [];
+    fresh.forEach((a) => seenApprovals.current.add(a.id));
+    if (fresh.length && !openRef.current) setOpen(true);
+  }, [snap, setOpen]);
+
   // A red alert pops the panel open once.
   const lastAlert = useRef<string | null>(null);
   useEffect(() => {
@@ -212,7 +220,7 @@ export default function App() {
         ref={surfaceRef}
         onMouseEnter={inTauri ? undefined : () => onHoverChange(true)}
         onMouseLeave={inTauri ? undefined : () => onHoverChange(false)}
-        className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && alert?.level === "red" ? "pulse-red" : ""} ${!open && mac && notch ? "notch-pill" : ""}`}
+        className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && snap.approvals.length ? "pulse-amber" : !open && alert?.level === "red" ? "pulse-red" : ""} ${!open && mac && notch ? "notch-pill" : ""}`}
         aria-hidden={hidden}
         inert={hidden}
         style={{ opacity: hidden ? 0 : 1, pointerEvents: hidden ? "none" : undefined, top: pill.top, width: open ? PANEL_W : pill.w, height, borderRadius: radius, transform: "translateX(-50%)" }}

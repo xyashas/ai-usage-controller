@@ -60,6 +60,20 @@ separate folder, so the agents don't edit the same files. Each task opens in its
 terminal. The Agents list shows each task as working or waiting for you, with its
 cost so far. Task text stays on your computer.
 
+**Know when an agent needs you.** Turn on *agent status* (Agents tab or Settings) and
+Claude Code and Codex tell the widget when they finish or are waiting for you. When
+Claude Code asks to run a command, the panel opens with **Allow / Deny / In terminal**,
+so you can answer from the notch. This adds a hook to `~/.claude/settings.json` and
+`~/.codex/config.toml`; only the folder and the event are recorded.
+
+**Verified done.** When an agent finishes, the widget runs the project's tests in its
+folder (cargo, npm/pnpm/yarn/bun, go, pytest, `make test`, or the command in
+`.aiuc/verify`) and shows *Tests pass* or *Tests fail*, with the output a click away.
+
+**Queue for when the limit resets.** Give a task to a tool that's out of room and it's
+held until that limit resets, then sent automatically. Or send it now, or move it to
+the tool with the most room.
+
 ## What's in v1
 
 | # | Feature | Plan | Where |

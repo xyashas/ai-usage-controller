@@ -261,8 +261,8 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    turn") / no_activity; with cost and request counts. Shown in the Agents tab and
    as a strip on the Usage panel. Dictation uses the OS: Win+H (sent with
    `keybd_event`) or macOS `startDictation:`; nothing is recorded by the app.
-   Next: approvals from the notch (Claude Code hooks), verified "done" (run tests
-   when an agent goes idle), task queue at limit reset, morning brief, learned routing.
+   Next: morning brief / weekly recap (Gemini, branch `gemini/daily-weekly-recap`),
+   learned routing.
 1e. **Destinations everywhere + GitHub.** App detection on Windows uses
    `Get-StartApps` (cached 5 min) and launches `explorer shell:AppsFolder\<AppID>`,
    so Store installs work; Codex falls back to the **ChatGPT app** (Codex is in its
@@ -286,12 +286,47 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    on a normal chat, not Codex). If the window never shows, nothing is typed and
    the prompt stays on the clipboard. The dispatcher sends app/web tasks one after
    another while each is delivered; it stops and offers "Copy & open next" otherwise.
+1g. **Agent status + approvals from the notch** (`core/src/agent_status.rs`,
+   `app/src-tauri/src/agents.rs`, `ui/src/components/Approvals.tsx`). Off until
+   the user turns it on (Agents tab card or Settings → Agents), because it edits
+   their global tool config: `~/.claude/settings.json` gets hooks on
+   UserPromptSubmit, Stop, Notification (permission/idle prompts) and
+   PermissionRequest; `~/.codex/config.toml` gets a top-level `notify` (left alone
+   if Codex already notifies another program). The hook is this same app binary:
+   `main` calls `hook_main()` first, which handles `--aiuc-hook claude|codex` and
+   exits before Tauri starts. Our entries are found by the `--aiuc-hook` flag, so
+   install/uninstall never touches other hooks, and they are rewritten at startup
+   so they follow the app if it moves. Each event writes one status file per
+   session in `<data dir>/agents/sessions/` (folder, kind, time; never the prompt
+   or reply). `Engine::agent_runs` prefers that report over log timing unless the
+   logs show newer activity: states add `needs_approval`, `done`, `queued`.
+   **Approvals**: on PermissionRequest the hook writes `agents/pending/<id>.json`
+   (tool name + one-line summary such as the command) and waits up to 60 s for
+   `agents/answers/<id>.json` from the widget (Allow / Deny / In terminal). No
+   answer, or the widget not running (heartbeat file `agents/alive` older than
+   20 s), means no output, so Claude Code asks in the terminal as usual. Both files
+   are deleted when answered. The panel pops open and the pill pulses amber.
+   Unverified: whether Claude Code shows its own prompt while the hook waits.
+1h. **Verified done** (`core/src/verify.rs`, setting `verify_done`, default on).
+   When a task's agent is done (Stop report, quiet 20 s) or idle, and there was
+   activity since the last run (within 2 h), the worker runs the project's tests
+   in the task folder: `.aiuc/verify` first line, else cargo / pnpm|yarn|bun|npm
+   test (not npm's placeholder) / go / pytest / `make test`. One run at a time, 15
+   min timeout (Windows kills the process tree). The task stores only the result
+   and seconds; the last 40 lines of output stay in memory for "show". Notifies
+   "Codex finished: tests pass".
+1i. **Queue at limit reset.** `ToolRoom.resets_at` is the used-up window's reset
+   (else the 5-hour one). In the dispatcher a task for a tool at ≥98% shows a
+   "Queued · 4:12 PM" chip (on by default, click to send anyway). Queued tasks
+   are rows with `queued_until` (and `worktree`); the worker sends due ones when
+   the tool shows >5% room: terminal at once, app/web only after 20 s without
+   keyboard/mouse input (`autosend::idle_secs`) since they're pasted in. Each row
+   offers Send now / Move to <roomiest tool> (`run_queued`).
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).
-3. **"Use it or lose it" + task queue.** Warn when a window will reset with lots
-   unused; let the user queue a task (`claude -p "<task>"` in a folder) that runs
-   when the limit resets or overnight.
+3. **"Use it or lose it".** Warn when a window will reset with lots unused (the
+   queue at reset is done, see 1i).
 4. **"What used up my limit?"** Plain-English breakdown of what burned the
    window (session, repeated file reads, cache misses, model choice) with a fix.
 5. Team: seat right-sizing report on the dashboard; deploy `api/` (Fly) and `web/` (Vercel).
@@ -301,7 +336,8 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
 - Keep UI copy plain and short; show % used; label estimates as "est.".
 - The user-confirmed local handoff file and the dispatcher's local `tasks` table
   (task text you typed, kept on this machine, never synced) are the explicit
-  persistence exceptions.
+  persistence exceptions. A pending approval file (tool name + one-line summary)
+  exists only until it is answered or times out.
   In usage tracking, never store or sync prompt text, code, file names or
   project names (sync sends counts only — there's a test for this). Keep it that way.
 - New core logic gets a test in `core/tests/core.rs`.

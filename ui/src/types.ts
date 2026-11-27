@@ -63,6 +63,7 @@ export interface HandoffOffer { source: Tool; session: string; targets: Tool[] }
 
 export interface Snapshot {
   agents: AgentRun[];
+  approvals: Approval[];
   handoffs: HandoffOffer[];
   gauge_history: { at: number; used: number; reset_at: number | null }[];
   idle_hidden: boolean;
@@ -97,6 +98,9 @@ export interface Settings {
   claude_web: boolean;
   api_base: string;
   auto_send: boolean;
+  agent_status: boolean;
+  approvals: boolean;
+  verify_done: boolean;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
 export type Mode = "collapsed" | "expanded";
@@ -132,9 +136,19 @@ export interface RepoLatest { branch: string; updated_at: number; origin: "commi
 export interface RepoStatus { id: string; local: boolean; root: string; name: string; set_up: boolean; current_branch: string; github: string | null; latest: RepoLatest | null }
 export interface SetupResult { root: string; changed: string[]; committed: boolean }
 
-export interface AgentRun { id: number; tool: Tool; text: string; repo_name: string; branch: string | null; cwd: string; started_at: string; state: "starting" | "working" | "idle" | "no_activity" | "opened"; dest: Dest | null; cost_usd: number; requests: number; last_activity_at: string | null }
+export type AgentState = "starting" | "working" | "idle" | "done" | "needs_approval" | "no_activity" | "opened" | "queued";
+export type VerifyState = "running" | "passed" | "failed" | "timed_out" | "error";
+export interface AgentRun {
+  id: number; tool: Tool; text: string; repo_name: string; branch: string | null; cwd: string; started_at: string; state: AgentState;
+  dest: Dest | null; cost_usd: number; requests: number; last_activity_at: string | null;
+  queued_until: string | null; verify: VerifyState | null; verify_secs: number | null; verify_at: string | null;
+}
+/** A tool call waiting for your OK. The summary is shown, never stored. */
+export interface Approval { id: string; tool: Tool; session: string; cwd: string; repo_name: string; tool_name: string; summary: string; at: string }
+export type ApprovalAnswer = "allow" | "deny" | "ask";
+export interface InstallResult { claude: boolean; codex: boolean; codex_busy: boolean }
 export interface Routed { text: string; tool: Tool | null; explicit: boolean; reason: string }
-export interface ToolRoom { tool: Tool; ready: boolean; used_pct: number | null; active: boolean }
+export interface ToolRoom { tool: Tool; ready: boolean; used_pct: number | null; active: boolean; resets_at: string | null }
 export interface DispatchPlan { tasks: Routed[]; rooms: ToolRoom[]; dests: Record<Tool, DestOption[]> }
 export interface Started { text: string; tool: Tool; dest: Dest; branch: string | null; message: string | null; delivered: boolean; error: string | null }
 export interface GithubStatus { login: string | null; cli: boolean; device_flow: boolean }

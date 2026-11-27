@@ -137,6 +137,8 @@ pub struct ToolRoom {
     pub used_pct: Option<f64>,
     /// The tool you're using right now.
     pub active: bool,
+    /// When its primary limit resets, if known (for queueing a task until then).
+    pub resets_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

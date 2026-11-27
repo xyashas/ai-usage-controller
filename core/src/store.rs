@@ -75,7 +75,9 @@ CREATE TABLE IF NOT EXISTS savings (
 
 /// Columns added after a table first shipped. Errors mean "already there".
 fn migrate(conn: &Connection) {
-    let _ = conn.execute("ALTER TABLE tasks ADD COLUMN dest TEXT", []);
+    for col in ["dest TEXT", "queued_until INTEGER", "worktree INTEGER NOT NULL DEFAULT 0", "verify TEXT", "verify_at INTEGER", "verify_secs REAL"] {
+        let _ = conn.execute(&format!("ALTER TABLE tasks ADD COLUMN {col}"), []);
+    }
 }
 
 impl Store {
@@ -336,18 +338,31 @@ impl Store {
 
     pub fn insert_task(&self, t: &TaskRow) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO tasks (created_at, repo, cwd, branch, tool, text, dest) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![ms(t.created_at), t.repo, t.cwd, t.branch, t.tool.as_str(), t.text, t.dest],
+            "INSERT INTO tasks (created_at, repo, cwd, branch, tool, text, dest, queued_until, worktree) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![ms(t.created_at), t.repo, t.cwd, t.branch, t.tool.as_str(), t.text, t.dest, t.queued_until.map(ms), t.worktree],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Tasks started since `from` that weren't dismissed, newest first.
+    /// Tasks started (or queued) since `from` that weren't dismissed, newest first.
     pub fn tasks_since(&self, from: DateTime<Utc>) -> Result<Vec<TaskRow>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, created_at, repo, cwd, branch, tool, text, dest FROM tasks WHERE created_at >= ?1 AND dismissed = 0 ORDER BY created_at DESC, id DESC",
-        )?;
-        let rows = stmt.query_map(params![ms(from)], |r| {
+        self.tasks_where("created_at >= ?1 AND dismissed = 0", ms(from))
+    }
+
+    /// Queued tasks whose time has come.
+    pub fn queued_due(&self, now: DateTime<Utc>) -> Result<Vec<TaskRow>> {
+        self.tasks_where("queued_until IS NOT NULL AND queued_until <= ?1 AND dismissed = 0", ms(now))
+    }
+
+    pub fn task(&self, id: i64) -> Result<Option<TaskRow>> {
+        Ok(self.tasks_where("id = ?1", id)?.into_iter().next())
+    }
+
+    fn tasks_where(&self, cond: &str, arg: i64) -> Result<Vec<TaskRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, created_at, repo, cwd, branch, tool, text, dest, queued_until, worktree, verify, verify_at, verify_secs FROM tasks WHERE {cond} ORDER BY created_at DESC, id DESC"
+        ))?;
+        let rows = stmt.query_map(params![arg], |r| {
             let tool: String = r.get(5)?;
             Ok(TaskRow {
                 id: r.get(0)?,
@@ -358,9 +373,34 @@ impl Store {
                 tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
                 text: r.get(6)?,
                 dest: r.get(7)?,
+                queued_until: r.get::<_, Option<i64>>(8)?.map(from_ms),
+                worktree: r.get::<_, Option<bool>>(9)?.unwrap_or(false),
+                verify: r.get(10)?,
+                verify_at: r.get::<_, Option<i64>>(11)?.map(from_ms),
+                verify_secs: r.get(12)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// A queued task was sent: it starts now, in `cwd`.
+    pub fn start_queued(&self, id: i64, now: DateTime<Utc>, tool: Tool, cwd: &str, branch: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tasks SET queued_until = NULL, created_at = ?2, tool = ?3, cwd = ?4, branch = ?5 WHERE id = ?1",
+            params![id, ms(now), tool.as_str(), cwd, branch],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_task_dest(&self, id: i64, dest: Option<&str>) -> Result<()> {
+        self.conn.execute("UPDATE tasks SET dest = ?2 WHERE id = ?1", params![id, dest])?;
+        Ok(())
+    }
+
+    /// Record a test run: "running", "passed", "failed", "timed_out" or "error".
+    pub fn set_verify(&self, id: i64, status: &str, at: DateTime<Utc>, secs: Option<f64>) -> Result<()> {
+        self.conn.execute("UPDATE tasks SET verify = ?2, verify_at = ?3, verify_secs = ?4 WHERE id = ?1", params![id, status, ms(at), secs])?;
+        Ok(())
     }
 
     pub fn dismiss_task(&self, id: i64) -> Result<()> {
@@ -399,4 +439,18 @@ pub struct TaskRow {
     pub text: String,
     /// "terminal", "app" or "web".
     pub dest: Option<String>,
+    /// Waiting for this tool's limit to reset; sent then.
+    pub queued_until: Option<DateTime<Utc>>,
+    /// Run in its own worktree (used when a queued task is sent).
+    pub worktree: bool,
+    /// Last test run: "running", "passed", "failed", "timed_out" or "error".
+    pub verify: Option<String>,
+    pub verify_at: Option<DateTime<Utc>>,
+    pub verify_secs: Option<f64>,
+}
+
+impl TaskRow {
+    pub fn new(repo: String, cwd: String, branch: Option<String>, tool: Tool, text: String, dest: Option<String>) -> TaskRow {
+        TaskRow { id: 0, created_at: Utc::now(), repo, cwd, branch, tool, text, dest, queued_until: None, worktree: false, verify: None, verify_at: None, verify_secs: None }
+    }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Approvals } from "./Approvals";
 import type { Alert, HandoffOffer, RepoStatus, Snapshot, Tool, ToolStatus, WindowStatus } from "../types";
 import type { View } from "../App";
 import { ToolMark } from "./ToolMark";
@@ -195,8 +196,11 @@ function AlertCard({ alert, snap, offer, cloud, onHandoff, onRepoHandoff, refres
 /** One line for running agents on the usage panel. */
 function AgentStrip({ agents, onOpen }: { agents: Snapshot["agents"]; onOpen: () => void }) {
   const working = agents.filter((a) => a.state === "working" || a.state === "starting").length;
-  const waiting = agents.filter((a) => a.state === "idle").length;
-  const parts = [working && `${working} working`, waiting && `${waiting} waiting for you`].filter(Boolean).join(" · ");
+  const waiting = agents.filter((a) => a.state === "idle" || a.state === "needs_approval").length;
+  const done = agents.filter((a) => a.state === "done").length;
+  const failing = agents.filter((a) => a.verify === "failed").length;
+  const queued = agents.filter((a) => a.state === "queued").length;
+  const parts = [working && `${working} working`, waiting && `${waiting} need${waiting === 1 ? "s" : ""} you`, failing ? `${failing} failing tests` : done && `${done} done`, queued && `${queued} queued`].filter(Boolean).join(" · ");
   return (
     <button onClick={onOpen} className="tile fade-in flex items-center gap-3 !py-2.5 text-left transition-colors hover:bg-[#1b1b1e]">
       <span className="flex -space-x-1.5">
@@ -207,7 +211,7 @@ function AgentStrip({ agents, onOpen }: { agents: Snapshot["agents"]; onOpen: ()
         ))}
       </span>
       <span className="flex-1 text-[12.5px] font-medium">Agents{parts ? ` · ${parts}` : ""}</span>
-      {waiting > 0 && <StateDot state="idle" />}
+      {waiting > 0 && <StateDot state="needs_approval" />}
       <span className="text-[12px] text-muted">Open →</span>
     </button>
   );
@@ -261,6 +265,7 @@ export function Expanded({ snap, onView, refresh, onHandoff, onRepoHandoff }: {
 
       {alert && <AlertCard alert={alert} snap={snap} offer={alertOffer} cloud={cloud} onHandoff={onHandoff} onRepoHandoff={onRepoHandoff} refresh={refresh} />}
 
+      <Approvals items={snap.approvals} refresh={refresh} />
       {snap.agents.some((a) => a.state !== "no_activity") && <AgentStrip agents={snap.agents} onOpen={() => onView("agents")} />}
 
       {otherOffers.map((o) => (

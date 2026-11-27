@@ -36,7 +36,7 @@ fn splits_a_spoken_request_into_routed_tasks() {
 }
 
 fn room(tool: Tool, used: Option<f64>, ready: bool) -> ToolRoom {
-    ToolRoom { tool, ready, used_pct: used, active: false }
+    ToolRoom { tool, ready, used_pct: used, active: false, resets_at: None }
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn each_task_gets_its_own_worktree_and_branch() {
 fn agent_runs_follow_the_session_in_the_task_folder() {
     let eng = Engine::in_memory().unwrap();
     let now = Utc::now();
-    let row = |cwd: &str, tool, mins| TaskRow { id: 0, created_at: now - Duration::minutes(mins), repo: "/dev/shop".into(), cwd: cwd.into(), branch: Some("agents/x".into()), tool, text: "Fix it".into(), dest: Some("terminal".into()) };
+    let row = |cwd: &str, tool, mins| TaskRow { created_at: now - Duration::minutes(mins), ..TaskRow::new("/dev/shop".into(), cwd.into(), Some("agents/x".into()), tool, "Fix it".into(), Some("terminal".into())) };
     let working = eng.record_task(&row("/dev/shop.agents/a", Tool::Codex, 10)).unwrap();
     let idle = eng.record_task(&row("/dev/shop.agents/b", Tool::ClaudeCode, 30)).unwrap();
     let fresh = eng.record_task(&row("/dev/shop.agents/c", Tool::Codex, 1)).unwrap();

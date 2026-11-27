@@ -74,6 +74,13 @@ pub struct Settings {
     /// After opening an app or web page for a task or handoff, paste the prompt
     /// and press Enter once that window is in front.
     pub auto_send: bool,
+    /// Claude Code and Codex report when they need you or finish (hooks in
+    /// ~/.claude/settings.json and ~/.codex/config.toml). Turned on from the widget.
+    pub agent_status: bool,
+    /// Allow or deny Claude Code's permission prompts from the widget.
+    pub approvals: bool,
+    /// Run the project's tests when an agent finishes, and show if they passed.
+    pub verify_done: bool,
 }
 
 impl Default for Settings {
@@ -96,6 +103,9 @@ impl Default for Settings {
             api_base: "https://api.aiusage.dev".into(),
             repos: vec![],
             auto_send: true,
+            agent_status: false,
+            approvals: true,
+            verify_done: true,
         }
     }
 }

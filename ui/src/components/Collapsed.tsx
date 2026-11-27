@@ -47,10 +47,19 @@ export function Collapsed({ snap, onOpen, notch }: { snap: Snapshot; onOpen: () 
   const note = claude?.live_note;
   const setup = !snap.onboarded;
   const connect = t?.needs_connect && (t.today_requests === 0 || used == null);
+  // Agents come first when one needs you; otherwise a small count of the busy ones.
+  const asking = snap.approvals[0];
+  const waiting = snap.agents.find((a) => a.state === "needs_approval");
+  const busy = snap.agents.filter((a) => a.state === "working" || a.state === "starting").length;
 
   return (
-    <button title={note ? `Claude: ${note}` : undefined} onClick={claude?.reconnect ? () => { api.connectClaude().catch(onOpen); } : onOpen} className="flex h-full w-full items-center gap-2 px-4 text-left" aria-label={claude?.reconnect ? "Reconnect Claude account" : "Open AI usage panel"}>
-      {setup || !t ? (
+    <button title={note ? `Claude: ${note}` : undefined} onClick={claude?.reconnect && !asking ? () => { api.connectClaude().catch(onOpen); } : onOpen} className="flex h-full w-full items-center gap-2 px-4 text-left" aria-label={asking ? "An agent needs your OK. Open the panel" : claude?.reconnect ? "Reconnect Claude account" : "Open AI usage panel"}>
+      {asking || waiting ? (
+        <>
+          <span className="live-dot h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
+          <span className="flex-1 truncate text-center text-[11.5px] font-medium text-fg">{asking ? `${asking.tool === "codex" ? "Codex" : asking.tool === "gemini" ? "Gemini" : "Claude"} needs your OK` : "An agent needs you"}</span>
+        </>
+      ) : setup || !t ? (
         <span className="flex-1 text-center text-[11.5px] font-medium text-muted">{setup ? "Finish setup" : "No AI tools found"}</span>
       ) : note ? (
         <><span className="text-[11.5px] text-fg">Claude</span><span className="flex-1 text-right text-[11px] text-muted">{note}</span></>
@@ -61,6 +70,7 @@ export function Collapsed({ snap, onOpen, notch }: { snap: Snapshot; onOpen: () 
         </>
       ) : (
         <>
+          {busy > 0 && <span title={`${busy} agent${busy > 1 ? "s" : ""} working`} className="flex items-center gap-1 text-[10.5px] font-semibold text-ok"><span className="live-dot h-1.5 w-1.5 rounded-full bg-ok" />{busy}</span>}
           <span className="max-w-[52px] truncate text-[11px] font-medium text-muted">{t.label}</span>
           {notch ? <svg aria-hidden="true" viewBox="0 0 16 16" className={`ml-auto h-4 w-4 ${textColor[own]}`}>
             <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" opacity=".25" strokeWidth="2" />

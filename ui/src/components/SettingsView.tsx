@@ -76,6 +76,15 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
       </Section>
 
       <Section title="Agents">
+        <Toggle label="Agent status" on={s.agent_status} set={async (v) => {
+          setSaveError("");
+          try { await api.setAgentStatus(v, s.approvals); setS({ ...s, agent_status: v }); }
+          catch (e) { setSaveError(String(e)); }
+        }} />
+        <p className="text-[11px] leading-relaxed text-muted">Claude Code and Codex tell the widget when they finish or need you. Adds a hook to their settings; only the folder and the event are recorded.</p>
+        {s.agent_status && <Toggle label="Approve Claude Code's requests from the widget" on={s.approvals} set={(v) => update({ ...s, approvals: v })} />}
+        <Toggle label="Run tests when an agent finishes" on={s.verify_done} set={(v) => update({ ...s, verify_done: v })} />
+        <p className="text-[11px] leading-relaxed text-muted">Runs the project's tests in the task's folder (cargo, npm, pnpm, go, pytest, make, or the command in <code className="text-fg">.aiuc/verify</code>) and shows whether they pass.</p>
         <Toggle label="Paste and send tasks automatically" on={s.auto_send} set={(v) => update({ ...s, auto_send: v })} />
         <p className="text-[11px] leading-relaxed text-muted">
           When a task or handoff opens in an app or the web, the widget pastes it and presses Enter once that window is in front. It never types into any other window.

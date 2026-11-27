@@ -38,6 +38,28 @@ pub fn paste_into(keywords: &[&str], send: bool, timeout: Duration, settle: Dura
     Outcome::NotFound
 }
 
+/// Seconds since the last key press or mouse move, if the system says.
+pub fn idle_secs() -> Option<u64> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::SystemInformation::GetTickCount;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+        let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+        if unsafe { GetLastInputInfo(&mut info) } == 0 { return None; }
+        Some((unsafe { GetTickCount() }.wrapping_sub(info.dwTime) / 1000) as u64)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("/usr/sbin/ioreg").args(["-c", "IOHIDSystem", "-d", "4"]).output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let line = text.lines().find(|l| l.contains("\"HIDIdleTime\""))?;
+        let ns: u64 = line.rsplit('=').next()?.trim().parse().ok()?;
+        Some(ns / 1_000_000_000)
+    }
+    #[cfg(target_os = "linux")]
+    { None }
+}
+
 #[cfg(windows)]
 fn front_window() -> String {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
