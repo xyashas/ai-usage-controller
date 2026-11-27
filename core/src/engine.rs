@@ -189,7 +189,7 @@ impl Engine {
             };
             // GitHub-only repos are stored as "owner/name".
             let path = std::path::Path::new(&t.repo);
-            let repo_name = if path.is_absolute() { path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() } else { t.repo.clone() };
+            let repo_name = if path.is_absolute() || t.repo.starts_with(['/', '\\']) { path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() } else { t.repo.clone() };
             out.push(crate::snapshot::AgentRun {
                 id: t.id, tool: t.tool, text: t.text, repo_name, branch: t.branch, cwd: t.cwd, dest: t.dest,
                 started_at: t.created_at, state: state.into(),
