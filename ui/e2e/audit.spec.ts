@@ -88,6 +88,29 @@ test.describe("Main interactive user flows", () => {
     expect(errors).toEqual([]);
   });
 
+  test("Ask keeps the conversation when the panel closes and reopens", async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto("/?view=ask&scenario=normal", { waitUntil: "networkidle" });
+    await page.waitForTimeout(250);
+    const input = page.locator("textarea").first();
+    await input.fill("Why did the coupon test fail?");
+    await input.press("Enter");
+    // Leave Ask while the answer is still streaming in (Escape → Usage, the
+    // Ask view unmounts), then come back to it.
+    await page.waitForTimeout(150);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(1500);
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
+    await page.waitForTimeout(600);
+    await expect(page.getByText("Why did the coupon test fail?")).toBeVisible();
+    await expect(page.getByRole("button", { name: "New chat" })).toBeVisible();
+    // The answer finished arriving while the panel was closed.
+    await expect(page.getByRole("button", { name: /^copy$/i }).first()).toBeVisible();
+    await page.getByRole("button", { name: "New chat" }).click();
+    await expect(page.getByText("Why did the coupon test fail?")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test("Ask flow: submit question, receive answer, copy", async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto("/?view=ask&scenario=normal", { waitUntil: "networkidle" });

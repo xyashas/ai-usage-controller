@@ -123,6 +123,7 @@ static GUIDING: AtomicBool = AtomicBool::new(false);
 
 pub fn on_press(app: &AppHandle) {
     let n = PRESS.fetch_add(1, Ordering::SeqCst) + 1;
+    app_ask::diag("hotkey pressed");
     HELD.store(true, Ordering::SeqCst);
     let app = app.clone();
     std::thread::spawn(move || {
@@ -143,13 +144,14 @@ pub fn on_press(app: &AppHandle) {
                 if let Ok(mut slot) = LISTEN.lock() { *slot = Some(l); }
                 show(&app, Buddy { mode: "listening".into(), ..Default::default() });
             }
-            Err(e) => show(&app, Buddy { mode: "error".into(), text: e, ..Default::default() }),
+            Err(e) => { app_ask::diag(&format!("voice start failed: {e}")); show(&app, Buddy { mode: "error".into(), text: e, ..Default::default() }) }
         }
     });
 }
 
 pub fn on_release(app: &AppHandle) {
     HELD.store(false, Ordering::SeqCst);
+    app_ask::diag("hotkey released");
     let listening = LISTEN.lock().ok().and_then(|mut l| l.take());
     match listening {
         Some(l) => {
@@ -158,8 +160,8 @@ pub fn on_release(app: &AppHandle) {
                 show(&app, Buddy { mode: "thinking".into(), said: LAST.lock().ok().and_then(|l| l.as_ref().and_then(|v| v.get("said")?.as_str().map(str::to_owned))).unwrap_or_default(), ..Default::default() });
                 match l.finish() {
                     Ok(said) if !said.is_empty() => voice_ask(&app, said),
-                    Ok(_) => show(&app, Buddy { mode: "error".into(), text: "I didn't catch that. Hold the keys and speak, then let go.".into(), ..Default::default() }),
-                    Err(e) => show(&app, Buddy { mode: "error".into(), text: e, ..Default::default() }),
+                    Ok(_) => { app_ask::diag("voice heard nothing"); show(&app, Buddy { mode: "error".into(), text: "I didn't catch that. Hold the keys and speak, then let go.".into(), ..Default::default() }) }
+                    Err(e) => { app_ask::diag(&format!("voice failed: {e}")); show(&app, Buddy { mode: "error".into(), text: e, ..Default::default() }) }
                 }
             });
         }

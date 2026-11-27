@@ -174,12 +174,51 @@ fn broken() -> &'static Mutex<HashMap<Tool, std::time::Instant>> {
     B.get_or_init(Default::default)
 }
 
+/// One line in `<data>/diagnostics.log`: how an Ask or voice attempt went
+/// (tool, time, exit code, error). Never the question or the answer. Kept small.
+pub fn diag(line: &str) {
+    let path = aiuc_core::paths::app_data_dir().join("diagnostics.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 256 * 1024) { let _ = std::fs::rename(&path, path.with_extension("old.log")); }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{} {line}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+    }
+}
+
+/// Tools to skip and until when, kept on disk so a restart doesn't retry a
+/// tool that was hanging or signed out a minute ago.
+fn broken_file() -> std::path::PathBuf {
+    aiuc_core::paths::app_data_dir().join("ask-skip.json")
+}
+
 fn mark_broken_for(tool: Tool, secs: u64) {
     if let Ok(mut b) = broken().lock() { b.insert(tool, std::time::Instant::now() + std::time::Duration::from_secs(secs)); }
+    let until = chrono::Utc::now().timestamp() + secs as i64;
+    let mut saved: HashMap<String, i64> = std::fs::read(broken_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    saved.insert(tool.as_str().to_owned(), until);
+    if let Ok(json) = serde_json::to_vec(&saved) { let _ = std::fs::write(broken_file(), json); }
 }
 
 fn is_broken(tool: Tool) -> bool {
+    static LOADED: std::sync::Once = std::sync::Once::new();
+    LOADED.call_once(|| {
+        let saved: HashMap<String, i64> = std::fs::read(broken_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let now = chrono::Utc::now().timestamp();
+        if let Ok(mut b) = broken().lock() {
+            for t in Tool::ALL {
+                if let Some(&until) = saved.get(t.as_str()) {
+                    if until > now { b.insert(t, std::time::Instant::now() + std::time::Duration::from_secs((until - now) as u64)); }
+                }
+            }
+        }
+    });
     broken().lock().ok().and_then(|b| b.get(&tool).copied()).is_some_and(|until| std::time::Instant::now() < until)
+}
+
+/// Pinning a tool, or a fresh start, clears its skip so you can try it again.
+pub fn clear_broken(tool: Tool) {
+    if let Ok(mut b) = broken().lock() { b.remove(&tool); }
+    let mut saved: HashMap<String, i64> = std::fs::read(broken_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    if saved.remove(tool.as_str()).is_some() { if let Ok(json) = serde_json::to_vec(&saved) { let _ = std::fs::write(broken_file(), json); } }
 }
 
 fn rooms(state: &AppState) -> Vec<Room> {
@@ -288,6 +327,7 @@ fn run_one(app: &AppHandle, id: &str, tool: Tool, mode: Mode, prompt: &str, imag
 fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &str, image: Option<&std::path::Path>) -> (String, Option<String>) {
     let Some(cli) = aiuc_core::handoff::cli(tool) else { return (String::new(), Some("That CLI isn't installed.".into())) };
     let cmd = ask::command(tool, &cli, mode, prompt, image);
+    let t0 = std::time::Instant::now();
     let dir = capture::temp_dir();
     let mut c = Command::new(&cmd.program);
     c.args(&cmd.args).current_dir(&dir).env(ENV_FLAG, "1").env("NO_COLOR", "1")
@@ -311,17 +351,24 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
     });
     if let Ok(mut m) = children().lock() { m.insert(id.to_owned(), child); }
     // A CLI that hangs (waiting on a login, a stuck network) is stopped, not left spinning.
-    let timed_out = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // And one that never starts answering (stuck on a login prompt, say) is
+    // given up on quickly, so Auto can ask the next tool instead.
+    use std::sync::atomic::{AtomicBool, Ordering as AO};
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let silent = Arc::new(AtomicBool::new(false));
+    let started = Arc::new(AtomicBool::new(false));
     {
-        let (key, flag) = (id.to_owned(), timed_out.clone());
+        let (key, flag, quiet, begun) = (id.to_owned(), timed_out.clone(), silent.clone(), started.clone());
         let limit = std::time::Duration::from_secs(if mode == Mode::Deep { 600 } else { 180 });
+        let first = std::time::Duration::from_secs(if mode == Mode::Deep { 150 } else { 45 });
         std::thread::spawn(move || {
             let start = std::time::Instant::now();
-            while start.elapsed() < limit {
+            loop {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 if !children().lock().map(|m| m.contains_key(&key)).unwrap_or(false) { return; }
+                if !begun.load(AO::SeqCst) && start.elapsed() > first { quiet.store(true, AO::SeqCst); break; }
+                if start.elapsed() > limit { flag.store(true, AO::SeqCst); break; }
             }
-            flag.store(true, std::sync::atomic::Ordering::SeqCst);
             kill_one(&key);
         });
     }
@@ -330,6 +377,7 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
     if let Some(out) = stdout {
         for line in BufReader::new(out).lines().map_while(Result::ok) {
             if let Some(piece) = reader.line(tool, &line) {
+                started.store(true, AO::SeqCst);
                 answer.push_str(&piece);
                 if let Some(app) = app { let _ = app.emit("ask-delta", Delta { id, text: &piece }); }
             }
@@ -338,8 +386,12 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
     let status = children().lock().ok().and_then(|mut m| m.remove(id)).and_then(|mut ch| ch.wait().ok());
     let stderr = err_tail.join().unwrap_or_default();
     let cancelled = status.is_none();
+    let exit = status.and_then(|s| s.code());
     let error = reader.error.or_else(|| {
-        if timed_out.load(std::sync::atomic::Ordering::SeqCst) && answer.trim().is_empty() {
+        if silent.load(AO::SeqCst) {
+            return Some(format!("{} didn't start answering.", crate::tool_name(tool)));
+        }
+        if timed_out.load(AO::SeqCst) && answer.trim().is_empty() {
             return Some(format!("{} didn't answer in time. Try again, or pick another tool.", crate::tool_name(tool)));
         }
         if cancelled { return Some("Stopped.".into()); }
@@ -349,6 +401,11 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
         }
         None
     });
+    diag(&format!(
+        "ask {} {:?} {:.1}s exit={:?} answer_chars={} error={}",
+        tool.as_str(), mode, t0.elapsed().as_secs_f32(), exit, answer.chars().count(),
+        error.as_deref().unwrap_or("-").chars().take(200).collect::<String>(),
+    ));
     (answer, error)
 }
 
@@ -363,6 +420,8 @@ pub fn ask_start(app: AppHandle, state: State<AppState>, req: AskRequest) -> Cmd
             return Ok(());
         }
     }
+    // You picked a tool yourself: try it, even if it failed a while ago.
+    if let Some(t) = req.tool { clear_broken(t); }
     let rooms = rooms(&state);
     let repo = current_repo(&state);
     let work = (ask::about_work(&req.question) || req.question.trim().is_empty() && c.selection.is_none() && c.screenshot.is_none()).then(|| {
@@ -424,6 +483,8 @@ pub fn answer(app: Option<&AppHandle>, id: &str, mut rooms: Vec<Room>, mut pick:
         let failure = ask::classify(&failed);
         match failure {
             ask::Failure::Unsupported => mark_broken_for(pick.tool, 24 * 3600),
+            // Hung without answering: skip it for a while, it'll likely hang again.
+            ask::Failure::Other if failed.ends_with("didn't start answering.") => mark_broken_for(pick.tool, 1800),
             ask::Failure::Other => {}
             _ => mark_broken_for(pick.tool, 600),
         }
@@ -433,7 +494,13 @@ pub fn answer(app: Option<&AppHandle>, id: &str, mut rooms: Vec<Room>, mut pick:
         } else { ask::explain_failure(pick.tool, failure) });
         if let Some(r) = rooms.iter_mut().find(|r| r.tool == pick.tool) { r.installed = false; }
         match ask::pick(&rooms, None) {
-            Some(next) => pick = next,
+            Some(next) => {
+                if let Some(app) = app {
+                    let text = format!("{} didn't answer, asking {}…", crate::tool_name(pick.tool), crate::tool_name(next.tool));
+                    let _ = app.emit("ask-status", serde_json::json!({ "id": id, "tool": next.tool, "text": text }));
+                }
+                pick = next;
+            }
             None => return Answered { text, error: Some(skipped.join(" ")), reason: String::new(), pick },
         }
     }

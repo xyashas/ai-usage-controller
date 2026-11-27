@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { View } from "../App";
 import type { AskAction, AskContext, AskDone, AskMode, AskTurn, Tool } from "../types";
 import { api, onAsk } from "../api";
@@ -20,6 +20,8 @@ type Answer = { text: string; done?: AskDone };
 type Item = {
   id: string; question: string; action: AskAction; label: string;
   answer: Answer; council?: Partial<Record<Tool | "combined", Answer>>; note?: string;
+  /** Live progress while waiting, e.g. "Gemini didn't answer, asking Claude". */
+  status?: { tool: Tool; text: string };
 };
 
 const actionLabel: Record<AskAction, string> = {
@@ -90,7 +92,7 @@ function AnswerActions({ item, ctx, onTask, speak }: {
   );
 }
 
-function AnswerBody({ a, tool }: { a: Answer; tool?: Tool | null }) {
+function AnswerBody({ a, tool, status }: { a: Answer; tool?: Tool | null; status?: Item["status"] }) {
   if (a.done?.error) return <p className="text-[12px] text-bad">{a.done.error}</p>;
   if (a.done?.opened_web) return <p className="text-[12px] text-muted">{a.done.reason}. No AI command-line tool is installed here, so it opened on the web.</p>;
   // "Remember…", "save this": a quiet confirmation, not an answer.
@@ -103,7 +105,15 @@ function AnswerBody({ a, tool }: { a: Answer; tool?: Tool | null }) {
     </p>
   );
   const shown = a.done ? a.done.text || a.text : a.text;
-  if (!shown.trim()) return <p className="flex items-center gap-2 text-[12px] text-muted"><span className="live-dot h-1.5 w-1.5 rounded-full" style={{ background: tool ? tint[tool].bar : "#fff" }} />Thinking…</p>;
+  if (!shown.trim()) {
+    const t = status?.tool ?? tool;
+    return (
+      <p className="flex items-center gap-2 text-[12px] text-muted">
+        <span className="live-dot h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t ? tint[t].bar : "#fff" }} />
+        <span>{status?.text ?? (t ? `${toolName[t]} is thinking…` : "Thinking…")}</span>
+      </p>
+    );
+  }
   return <Markdown text={shown.replace(/<point[^>]*\/>/g, "")} />;
 }
 
@@ -114,20 +124,76 @@ function saveHistory(answer: string) {
   try { localStorage.setItem("ask.saved", JSON.stringify([{ q: lastQuestion, a: answer, at: Date.now() }, ...loadHistory()].slice(0, 20))); } catch { /* full or private */ }
 }
 
+// ---------- the conversation outlives the panel ----------
+// Closing the panel unmounts this view; the conversation (and any answer still
+// streaming in) lives here instead, so reopening picks up where you were.
+type Session = { items: Item[]; busy: string | null; at: number };
+let session: Session = { items: [], busy: null, at: 0 };
+const sessionSubs = new Set<() => void>();
+function setSession(f: (s: Session) => Partial<Session>) {
+  session = { ...session, ...f(session), at: Date.now() };
+  sessionSubs.forEach((l) => l());
+}
+const subscribeSession = (l: () => void) => { sessionSubs.add(l); return () => { sessionSubs.delete(l); }; };
+/** An ask is running, or you used Ask in the last few minutes. */
+export function askSessionActive(withinMs = 5 * 60_000): boolean {
+  return !!session.busy || (session.items.length > 0 && Date.now() - session.at < withinMs);
+}
+
+function speakText(t: string) {
+  if (!("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(new SpeechSynthesisUtterance(plain(t).slice(0, 1500)));
+}
+
+// One listener for the app's lifetime: answers keep arriving while the panel is closed.
+let listening = false;
+function listenOnce() {
+  if (listening) return;
+  listening = true;
+  const items = (f: (all: Item[]) => Item[]) => setSession((s) => ({ items: f(s.items) }));
+  onAsk(
+    (id, piece) => items((all) => all.map((it) => {
+      const [base, part] = id.split(":");
+      if (it.id !== base) return it;
+      if (!part) return { ...it, answer: { ...it.answer, text: it.answer.text + piece } };
+      const cur = it.council?.[part as Tool] ?? { text: "" };
+      return { ...it, council: { ...it.council, [part]: { ...cur, text: cur.text + piece } } };
+    })),
+    (d) => {
+      const [base, part] = d.id.split(":");
+      items((all) => all.map((it) => {
+        if (it.id !== base) return it;
+        if (!part) return { ...it, answer: { text: it.answer.text || d.text || "", done: d } };
+        const cur = it.council?.[part as Tool] ?? { text: "" };
+        return { ...it, council: { ...it.council, [part]: { ...cur, done: d } } };
+      }));
+      if (!part || part === "combined") {
+        setSession((s) => ({ busy: s.busy === base ? null : s.busy }));
+        if (!d.error && d.text && pref("history", "0") === "1") saveHistory(d.text);
+        if (pref("voice", "0") === "1" && !d.error && d.text && d.reason !== "noted") speakText(d.text);
+      }
+    },
+    (id, status) => items((all) => all.map((it) => (it.id === id.split(":")[0] ? { ...it, status } : it))),
+  );
+}
+
 export function AskView({ onView, onTask, init }: { onView: (v: View) => void; onTask: (text: string) => void; init: { text: string; action: string } | null }) {
   const [ctx, setCtx] = useState<AskContext | null>(null);
   const [text, setText] = useState("");
-  const [items, setItems] = useState<Item[]>([]);
+  listenOnce();
+  const { items, busy } = useSyncExternalStore(subscribeSession, () => session);
+  // A conversation left alone for half an hour starts fresh.
+  useEffect(() => { if (!session.busy && session.items.length && Date.now() - session.at > 30 * 60_000) setSession(() => ({ items: [] })); }, []);
+  const setItems = (f: Item[] | ((all: Item[]) => Item[])) => setSession((s) => ({ items: typeof f === "function" ? f(s.items) : f }));
+  const setBusy = (b: string | null) => setSession(() => ({ busy: b }));
   const [mode, setMode] = useState<AskMode>(pref("mode", "quick") as AskMode);
   const [pinned, setPinned] = useState<Tool | null>((pref("tool", "") || null) as Tool | null);
   const [council, setCouncil] = useState(false);
   const [voice, setVoice] = useState(pref("voice", "0") === "1");
-  const [busy, setBusy] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const polish = usePromptPolish(text, null);
-  const voiceRef = useRef(voice);
-  voiceRef.current = voice;
 
   // Just asked out loud? Carry that conversation on here.
   useEffect(() => {
@@ -142,39 +208,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
   useEffect(() => { loadCtx(pinned); }, [pinned]);
   useEffect(() => { api.focus().finally(() => box.current?.focus({ preventScroll: true })); }, []);
 
-  const speak = (t: string) => {
-    if (!("speechSynthesis" in window)) return;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(new SpeechSynthesisUtterance(plain(t).slice(0, 1500)));
-  };
-
-  // Stream answers into their item: "<id>", or "<id>:<tool>" / "<id>:combined" for Council.
-  useEffect(() => {
-    const sub = onAsk(
-      (id, piece) => setItems((all) => all.map((it) => {
-        const [base, part] = id.split(":");
-        if (it.id !== base) return it;
-        if (!part) return { ...it, answer: { ...it.answer, text: it.answer.text + piece } };
-        const cur = it.council?.[part as Tool] ?? { text: "" };
-        return { ...it, council: { ...it.council, [part]: { ...cur, text: cur.text + piece } } };
-      })),
-      (d) => {
-        const [base, part] = d.id.split(":");
-        setItems((all) => all.map((it) => {
-          if (it.id !== base) return it;
-          if (!part) return { ...it, answer: { text: it.answer.text || d.text || "", done: d } };
-          const cur = it.council?.[part as Tool] ?? { text: "" };
-          return { ...it, council: { ...it.council, [part]: { ...cur, done: d } } };
-        }));
-        if (!part || part === "combined") {
-          setBusy((b) => (b === base ? null : b));
-          if (!d.error && d.text && pref("history", "0") === "1") saveHistory(d.text);
-          if (voiceRef.current && !d.error && d.text) speak(d.text);
-        }
-      },
-    );
-    return () => { sub.then((u) => u()); };
-  }, []);
+  const speak = speakText;
 
   useEffect(() => { end.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [items]);
 
@@ -233,8 +267,17 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
   return (
     <div className="flex flex-col gap-2.5 p-3">
       <header className="flex items-center gap-2 px-1">
-        <button className="icon-btn" aria-label="Back" title="Back" onClick={() => { stop(); onView("panel"); }}><BackIcon /></button>
+        <button className="icon-btn" aria-label="Back" title="Back" onClick={() => onView("panel")}><BackIcon /></button>
         <h2 className="text-[15px] font-semibold tracking-tight">Ask</h2>
+        {items.length > 0 && (
+          <button
+            className="fade-in rounded-full px-2 py-0.5 text-[11px] font-medium text-muted transition-colors hover:bg-white/[0.08] hover:text-fg"
+            title="Start a new conversation"
+            onClick={() => { stop(); setItems([]); box.current?.focus(); }}
+          >
+            New chat
+          </button>
+        )}
         <div className="ml-auto flex items-center gap-1.5">
           <button
             onClick={cycleTool}
@@ -282,7 +325,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
                   </div>
                 ) : (
                   <div className="card space-y-2 !p-3.5">
-                    <AnswerBody a={it.answer} tool={shownTool} />
+                    <AnswerBody a={it.answer} tool={shownTool} status={it.status} />
                   </div>
                 )}
                 {(d || it.council?.combined?.done) && !(d?.error) && (

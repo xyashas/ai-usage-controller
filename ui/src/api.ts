@@ -114,12 +114,17 @@ export async function onHover(cb: (inside: boolean) => void): Promise<() => void
 }
 
 /** Streamed pieces of an answer, and the end of it. */
-export async function onAsk(delta: (id: string, text: string) => void, done: (d: AskDone) => void): Promise<() => void> {
+export async function onAsk(
+  delta: (id: string, text: string) => void,
+  done: (d: AskDone) => void,
+  status?: (id: string, s: { tool: Tool; text: string }) => void,
+): Promise<() => void> {
   if (inTauri) {
     const { listen } = await import("@tauri-apps/api/event");
     const a = await listen<{ id: string; text: string }>("ask-delta", (e) => delta(e.payload.id, e.payload.text));
     const b = await listen<AskDone>("ask-done", (e) => done(e.payload));
-    return () => { a(); b(); };
+    const c = await listen<{ id: string; tool: Tool; text: string }>("ask-status", (e) => status?.(e.payload.id, { tool: e.payload.tool, text: e.payload.text }));
+    return () => { a(); b(); c(); };
   }
   mockAskListeners.push({ delta, done });
   return () => { mockAskListeners = mockAskListeners.filter((l) => l.delta !== delta); };

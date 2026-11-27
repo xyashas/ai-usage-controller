@@ -78,3 +78,28 @@ fn inbox_capture_contract() {
     assert_eq!(i.app.as_deref(), Some("Chrome"));
     assert!(inbox::capture(&s, "  ", inbox::Source::Voice, None, Utc::now()).is_err());
 }
+
+/// Every window the app creates must be allowed to listen to events, or it
+/// silently shows nothing (the voice buddy did exactly that once).
+#[test]
+fn every_window_may_listen_to_events() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/src-tauri");
+    let caps: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("capabilities/default.json")).unwrap()).unwrap();
+    let windows: Vec<&str> = caps["windows"].as_array().unwrap().iter().filter_map(|w| w.as_str()).collect();
+    let perms = caps["permissions"].to_string();
+    assert!(perms.contains("core:event:default"));
+    for label in ["widget", "buddy"] {
+        assert!(windows.contains(&label), "window {label:?} missing from capabilities/default.json");
+    }
+    // And any window built in code that loads our own page is one of them.
+    // (External pages, like the claude.ai sign-in, must NOT get these rights.)
+    for f in std::fs::read_dir(root.join("src")).unwrap().flatten() {
+        let src = std::fs::read_to_string(f.path()).unwrap_or_default();
+        for (i, _) in src.match_indices("WebviewWindowBuilder::new(") {
+            let call = &src[i..src[i..].find(')').map_or(src.len(), |e| i + e)];
+            if !src[i..].split(".build()").next().unwrap_or("").contains("WebviewUrl::App") { continue; }
+            let label = call.split('"').nth(1).unwrap_or("");
+            assert!(windows.contains(&label), "{:?} builds window {label:?}, which isn't in capabilities", f.path());
+        }
+    }
+}

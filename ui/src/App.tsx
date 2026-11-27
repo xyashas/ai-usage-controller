@@ -3,7 +3,7 @@ import { HandoffPreview, type Draft } from "./components/HandoffPreview";
 import type { HandoffOffer, RepoStatus, Tool, Snapshot } from "./types";
 import { HandoffHub } from "./components/HandoffHub";
 import { AgentsView } from "./components/AgentsView";
-import { AskView } from "./components/AskView";
+import { AskView, askSessionActive } from "./components/AskView";
 import { api, inTauri, onHover, onOpenView, onSnapshot, onToggle } from "./api";
 import { Collapsed } from "./components/Collapsed";
 import { Expanded } from "./components/Expanded";
@@ -69,7 +69,8 @@ export default function App() {
         if (viewRef.current !== "onboarding") setMounted(false);
         // Back to the main panel next time, unless setup isn't finished.
         setDraft(null);
-        setView((v) => (v === "onboarding" ? v : "panel"));
+        // An Ask conversation in progress (or just now) reopens where you left it.
+        setView((v) => (v === "onboarding" || (v === "ask" && askSessionActive()) ? v : "panel"));
       }, ANIM_MS);
     }
     setOpenState(next);

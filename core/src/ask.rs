@@ -229,7 +229,10 @@ pub fn pick(rooms: &[Room], pinned: Option<Tool>) -> Option<Pick> {
             if r.used_pct.is_none_or(|u| u < 98.0) { return Some(Pick { tool: p, reason: "your pick".into() }); }
         }
     }
-    let best = ok.iter().min_by(|a, b| a.used_pct.unwrap_or(50.0).total_cmp(&b.used_pct.unwrap_or(50.0)))?;
+    // Most room wins, but Gemini only when it clearly has more: its CLI is the
+    // least dependable for quick answers (slow start, Google's login changes).
+    let load = |r: &Room| r.used_pct.unwrap_or(50.0) + if r.tool == Tool::Gemini { 40.0 } else { 0.0 };
+    let best = ok.iter().min_by(|a, b| load(a).total_cmp(&load(b)))?;
     let full: Vec<String> = rooms.iter()
         .filter_map(|r| r.used_pct.filter(|&u| r.tool != best.tool && u >= 80.0).map(|u| format!("{} is at {u:.0}%", tool_label(r.tool))))
         .collect();
