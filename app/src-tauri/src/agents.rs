@@ -30,8 +30,10 @@ pub fn hook_main() -> bool {
             use std::io::Read;
             let mut input = String::new();
             let _ = std::io::stdin().take(4 << 20).read_to_string(&mut input);
-            // Only wait for an answer if the widget is running to give one.
-            let wait = if alive(&base) { std::time::Duration::from_secs(st::APPROVAL_WAIT_SECS) } else { std::time::Duration::ZERO };
+            // Only wait for an answer if the widget is running to give one, and
+            // you're not already at the terminal: Claude Code shows its own
+            // prompt only after this hook returns, so waiting there would stall it.
+            let wait = if alive(&base) && !crate::capture::at_terminal() { std::time::Duration::from_secs(st::APPROVAL_WAIT_SECS) } else { std::time::Duration::ZERO };
             if let Some(out) = st::handle_claude(&base, &input, wait) { println!("{out}"); }
         }
         Some("codex") => { if let Some(json) = args.last() { st::handle_codex(&base, json); } }

@@ -64,7 +64,7 @@ function AnswerActions({ item, ctx, onTask, speak }: {
   const [note, setNote] = useState("");
   const done = (item.council?.combined ?? item.answer).done;
   const text = (item.council?.combined ?? item.answer).text.trim();
-  if (!done || done.error || !text) return null;
+  if (!done || done.error || !text || done.reason === "noted") return null;
   const run = command(text);
   const fixable = item.action === "fix" || ERRORISH.test(ctx?.selection ?? ctx?.clipboard ?? "");
   // Rewrites go back where they came from; other answers are copied.
@@ -93,6 +93,15 @@ function AnswerActions({ item, ctx, onTask, speak }: {
 function AnswerBody({ a, tool }: { a: Answer; tool?: Tool | null }) {
   if (a.done?.error) return <p className="text-[12px] text-bad">{a.done.error}</p>;
   if (a.done?.opened_web) return <p className="text-[12px] text-muted">{a.done.reason}. No AI command-line tool is installed here, so it opened on the web.</p>;
+  // "Remember…", "save this": a quiet confirmation, not an answer.
+  if (a.done?.reason === "noted") return (
+    <p className="fade-in flex items-start gap-2 text-[12.5px]">
+      <span className="mt-[2px] flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#34c759]/15 text-[#34c759]">
+        <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 6.2l2.2 2.2 4.8-4.9" /></svg>
+      </span>
+      <span>{a.done.text}<span className="block text-[11px] text-muted">See or change it in Settings → Ask.</span></span>
+    </p>
+  );
   const shown = a.done ? a.done.text || a.text : a.text;
   if (!shown.trim()) return <p className="flex items-center gap-2 text-[12px] text-muted"><span className="live-dot h-1.5 w-1.5 rounded-full" style={{ background: tool ? tint[tool].bar : "#fff" }} />Thinking…</p>;
   return <Markdown text={shown.replace(/<point[^>]*\/>/g, "")} />;
@@ -338,7 +347,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
           <button
             role="switch" aria-checked={voice}
             title="Read answers aloud"
-            onClick={() => { setVoice(!voice); setPref("voice", voice ? "0" : "1"); if (voice) speechSynthesis?.cancel(); }}
+            onClick={() => { setVoice(!voice); setPref("voice", voice ? "0" : "1"); if (voice) speechSynthesis?.cancel(); box.current?.focus(); }}
             className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${voice ? "bg-white/15 text-fg" : "text-muted hover:text-fg"}`}
           >
             {voice ? "Speaking on" : "Speak"}
@@ -347,7 +356,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
             role="switch" aria-checked={council}
             disabled={(ctx?.installed.length ?? 0) < 2}
             title={(ctx?.installed.length ?? 0) < 2 ? "Council needs two or more AI tools installed" : "Ask Claude, Codex and Gemini at once, then combine the answers"}
-            onClick={() => setCouncil(!council)}
+            onClick={() => { setCouncil(!council); box.current?.focus(); }}
             className={`rounded-full px-2.5 py-1 text-[11px] font-medium disabled:opacity-40 ${council ? "bg-[#DDD7F3] text-[#1C1535]" : "text-muted hover:text-fg"}`}
           >
             Council
@@ -366,7 +375,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
       {polish.error && <p className="px-1 text-[11.5px] text-bad">{polish.error}</p>}
       {polish.draft && <PolishDiffCard original={polish.draft.original} polished={polish.draft.polished} onAccept={(next) => { setText(next); polish.clear(); box.current?.focus(); }} onKeep={polish.clear} />}
       <p className="px-1 text-[10.5px] text-mute">
-        {mac ? "⌥⇧Space" : "Alt+Shift+Space"} from anywhere. Uses the AI tools you already have; {pref("history", "0") === "1" ? "the last 20 answers are kept on this computer" : "nothing is kept unless you say \u201cremember\u201d"}.
+        {mac ? "⌥⇧Space anywhere · " : "Alt+Shift+Space anywhere · hold to talk · "}{pref("history", "0") === "1" ? "last 20 kept on this computer" : "nothing kept unless you say \u201cremember\u201d"}
       </p>
     </div>
   );

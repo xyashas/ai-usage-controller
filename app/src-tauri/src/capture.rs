@@ -123,6 +123,43 @@ fn front() -> Origin {
 #[cfg(target_os = "linux")]
 fn front() -> Origin { Origin::default() }
 
+/// The program in front (lowercase file name, e.g. "windowsterminal.exe", or
+/// the app name on a Mac).
+pub fn front_program() -> String {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+        let h = GetForegroundWindow();
+        if h.is_null() { return String::new(); }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, &mut pid);
+        let p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if p.is_null() { return String::new(); }
+        let mut buf = [0u16; 520];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(p, 0, buf.as_mut_ptr(), &mut len);
+        windows_sys::Win32::Foundation::CloseHandle(p);
+        if ok == 0 { return String::new(); }
+        let path = String::from_utf16_lossy(&buf[..len as usize]);
+        path.rsplit(['\\', '/']).next().unwrap_or("").to_lowercase()
+    }
+    #[cfg(not(windows))]
+    { front().app.to_lowercase() }
+}
+
+/// You're at a terminal or code editor right now (where an agent's own
+/// permission prompt would appear).
+pub fn at_terminal() -> bool {
+    let p = front_program();
+    // Exact names (so "code" doesn't match "codex.exe"); a few by prefix.
+    const EXACT: [&str; 17] = [
+        "windowsterminal.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "conhost.exe", "wezterm-gui.exe", "alacritty.exe", "kitty",
+        "hyper.exe", "tabby.exe", "code.exe", "cursor.exe", "windsurf.exe", "terminal", "ghostty", "visual studio code", "warp",
+    ];
+    !p.is_empty() && (EXACT.contains(&p.as_str()) || ["iterm", "powershell", "pwsh", "code - insiders"].iter().any(|t| p.starts_with(t)))
+}
+
 // ---------- keys ----------
 
 /// Wait (briefly) for the hotkey's modifiers to be let go, so a simulated
