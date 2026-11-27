@@ -74,6 +74,7 @@ jobs:
           node-version: 22
       - run: npm ci --prefix ui && npm run build --prefix ui
       - run: cargo check -p aiuc-app
+      - run: cargo test -p aiuc-app --lib
 
   ui:
     name: Widget UI

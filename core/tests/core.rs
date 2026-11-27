@@ -661,18 +661,65 @@ fn handoff_summarizes_claude_and_codex_fixture_logs_locally() {
 }
 
 #[test]
-fn handoff_saves_edits_and_updates_existing_ignore_file_once() {
+fn handoff_saves_edits_and_hides_the_file_from_git_without_touching_gitignore() {
     use aiuc_core::handoff::{save, FILENAME};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path();
+    // Not a repository: just the file.
     save(path, "first draft").unwrap();
-    assert!(!path.join(".gitignore").exists());
+    assert!(!path.join(".git").exists());
+
+    // A repository whose project folder is a subfolder of the repo root.
+    std::fs::create_dir_all(path.join(".git/info")).unwrap();
     std::fs::write(path.join(".gitignore"), "build/\r\nlogs/").unwrap();
-    save(path, "edited local prompt").unwrap();
-    save(path, "edited local prompt").unwrap();
-    assert_eq!(std::fs::read_to_string(path.join(".gitignore")).unwrap(), "build/\r\nlogs/\r\n/.aiuc-handoff.md\r\n");
-    assert!(save(path, &"word ".repeat(1500)).is_err());
-    assert_eq!(std::fs::read_to_string(path.join(FILENAME)).unwrap(), "edited local prompt");
+    std::fs::write(path.join(".git/info/exclude"), "# git ls-files --others --exclude-from=.git/info/exclude").unwrap();
+    let sub = path.join("app");
+    std::fs::create_dir(&sub).unwrap();
+    save(&sub, "edited local prompt").unwrap();
+    save(&sub, "edited local prompt").unwrap();
+    assert_eq!(std::fs::read_to_string(path.join(".gitignore")).unwrap(), "build/\r\nlogs/", "tracked .gitignore untouched");
+    let exclude = std::fs::read_to_string(path.join(".git/info/exclude")).unwrap();
+    assert_eq!(exclude.matches(FILENAME).count(), 1, "added once: {exclude}");
+    assert!(exclude.ends_with(&format!("\n{FILENAME}\n")));
+    assert!(save(&sub, &"word ".repeat(1500)).is_err());
+    assert_eq!(std::fs::read_to_string(sub.join(FILENAME)).unwrap(), "edited local prompt");
+
+    // A worktree: `.git` is a file pointing at the real git dir, whose commondir holds info/exclude.
+    let wt = tempfile::tempdir().unwrap();
+    let common = wt.path().join("main.git");
+    let gd = common.join("worktrees/feature");
+    std::fs::create_dir_all(&gd).unwrap();
+    std::fs::write(gd.join("commondir"), "../..").unwrap();
+    let checkout = wt.path().join("feature");
+    std::fs::create_dir(&checkout).unwrap();
+    std::fs::write(checkout.join(".git"), format!("gitdir: {}\n", gd.display())).unwrap();
+    save(&checkout, "worktree prompt").unwrap();
+    let ex = std::fs::read_to_string(common.join("info/exclude")).unwrap();
+    assert_eq!(ex, format!("{FILENAME}\n"));
+}
+
+#[test]
+fn handoff_finds_clis_outside_a_gui_apps_short_path() {
+    use aiuc_core::handoff::{extra_dirs, find_executable};
+    let home = tempfile::tempdir().unwrap();
+    // nvm: the newest Node version wins.
+    for v in ["v20.1.0", "v22.3.0"] {
+        let bin = home.path().join(".nvm/versions/node").join(v).join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let name = if cfg!(windows) { "codex.cmd" } else { "codex" };
+        let f = bin.join(name);
+        std::fs::write(&f, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let extra = extra_dirs(Some(home.path()));
+    let empty_path = std::ffi::OsString::new();
+    let found = find_executable("codex", Some(&empty_path), &extra).expect("found via nvm");
+    assert!(found.to_string_lossy().contains("v22.3.0"), "{found:?}");
+    assert!(find_executable("definitely-not-installed-cli", Some(&empty_path), &extra).is_none());
 }
 
 #[test]

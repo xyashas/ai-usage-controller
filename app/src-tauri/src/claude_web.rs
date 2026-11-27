@@ -8,7 +8,6 @@
 //! cookies, and we read the result back. The login never leaves that webview:
 //! the app doesn't copy the cookie, and requests only ever go to claude.ai.
 
-use aiuc_core::model::Tool;
 use aiuc_core::Engine;
 use chrono::Utc;
 use serde_json::Value;

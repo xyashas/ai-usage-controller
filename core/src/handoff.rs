@@ -4,25 +4,83 @@ use serde_json::Value;
 use std::{fs::{self, File}, io::{BufRead, BufReader, Write}, path::{Path, PathBuf}};
 use walkdir::WalkDir;
 
-pub fn executable(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
+fn is_executable(candidate: &Path) -> bool {
+    let Ok(meta) = candidate.metadata() else { return false };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o111 == 0 { return false; }
+    }
+    meta.is_file()
+}
+
+/// Folders where the AI CLIs usually land but that a GUI app's PATH often
+/// lacks. Apps opened from the macOS Dock or Finder get only
+/// /usr/bin:/bin:/usr/sbin:/sbin, so npm, Homebrew and nvm installs are
+/// invisible without these.
+pub fn extra_dirs(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    #[cfg(not(windows))]
+    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    if let Some(h) = home {
+        for rel in [".local/bin", ".npm-global/bin", ".volta/bin", ".bun/bin", ".claude/local", "scoop/shims"] {
+            dirs.push(h.join(rel));
+        }
+        // nvm: the newest installed Node's bin folder.
+        let mut nvm: Vec<PathBuf> = fs::read_dir(h.join(".nvm/versions/node"))
+            .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path().join("bin")).collect())
+            .unwrap_or_default();
+        nvm.sort();
+        dirs.extend(nvm.into_iter().rev());
+    }
+    #[cfg(windows)]
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        dirs.push(PathBuf::from(appdata).join("npm"));
+    }
+    dirs
+}
+
+/// Look for `name` on PATH, then in [`extra_dirs`]. `.cmd` covers npm installs on Windows.
+pub fn find_executable(name: &str, path: Option<&std::ffi::OsStr>, extra: &[PathBuf]) -> Option<PathBuf> {
     #[cfg(windows)]
     let names = [format!("{name}.exe"), format!("{name}.cmd")];
     #[cfg(not(windows))]
     let names = [name.to_owned()];
-    for dir in std::env::split_paths(&path).filter(|p| p.is_absolute()) {
-        for name in &names {
-            let candidate = dir.join(name);
-            let Ok(meta) = candidate.metadata() else { continue };
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if meta.permissions().mode() & 0o111 == 0 { continue; }
-            }
-            if meta.is_file() { return Some(candidate); }
-        }
+    let on_path: Vec<PathBuf> = path.map(|p| std::env::split_paths(p).collect()).unwrap_or_default();
+    on_path.iter().chain(extra.iter()).filter(|d| d.is_absolute())
+        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
+        .find(|c| is_executable(c))
+}
+
+/// Last resort on macOS: ask the user's login shell, which has their real PATH.
+#[cfg(target_os = "macos")]
+fn login_shell_lookup(name: &str) -> Option<PathBuf> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let out = std::process::Command::new(shell)
+        .args(["-lc", &format!("command -v {name}")])
+        .stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .output().ok()?;
+    let p = PathBuf::from(String::from_utf8_lossy(&out.stdout).lines().last()?.trim());
+    (p.is_absolute() && is_executable(&p)).then_some(p)
+}
+
+pub fn executable(name: &str) -> Option<PathBuf> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    // The snapshot asks every few seconds; a minute's cache keeps that cheap
+    // while still noticing a CLI installed after the app started.
+    type Lookups = HashMap<String, (Instant, Option<PathBuf>)>;
+    static CACHE: OnceLock<Mutex<Lookups>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((at, hit)) = cache.lock().ok()?.get(name) {
+        if at.elapsed() < Duration::from_secs(60) { return hit.clone(); }
     }
-    None
+    let found = find_executable(name, std::env::var_os("PATH").as_deref(), &extra_dirs(dirs::home_dir().as_deref()));
+    #[cfg(target_os = "macos")]
+    let found = found.or_else(|| login_shell_lookup(name));
+    cache.lock().ok()?.insert(name.to_owned(), (Instant::now(), found.clone()));
+    found
 }
 
 pub fn cli(tool: Tool) -> Option<PathBuf> {
@@ -224,24 +282,56 @@ pub const FILENAME: &str = ".aiuc-handoff.md";
 
 pub fn save(cwd: &Path, prompt: &str) -> Result<()> {
     ensure!(!prompt.trim().is_empty() && prompt.len() <= 100_000 && prompt.split_whitespace().count() < 1500, "Use a nonempty handoff under 1,500 words and 100 KB.");
-    let ignore = cwd.join(".gitignore");
-    match fs::symlink_metadata(&ignore) {
-        Ok(meta) => {
-            ensure!(meta.file_type().is_file(), "Cannot update this .gitignore.");
-            let contents = fs::read(&ignore)?;
-            if !contents.split(|b| *b == b'\n').map(|s| s.strip_suffix(b"\r").unwrap_or(s)).any(|s| s == b"/.aiuc-handoff.md" || s == b".aiuc-handoff.md") {
-                let mut file = fs::OpenOptions::new().append(true).open(ignore)?;
-                let newline: &[u8] = if contents.windows(2).any(|s| s == b"\r\n") { b"\r\n" } else { b"\n" };
-                if !contents.is_empty() && !contents.ends_with(b"\n") { file.write_all(newline)?; }
-                file.write_all(b"/.aiuc-handoff.md")?;
-                file.write_all(newline)?;
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.into()),
-    }
+    // Keep the file out of git without touching the user's tracked .gitignore.
+    // Best effort: a repo we can't read is no reason to fail the handoff.
+    let _ = exclude_from_git(cwd);
     let mut file = tempfile::NamedTempFile::new_in(cwd)?;
     file.write_all(prompt.as_bytes())?;
     file.persist(cwd.join(FILENAME))?;
     Ok(())
+}
+
+/// The repository's git directory for `start` or any parent: `.git` itself, or
+/// for worktrees and submodules the directory a `.git` file points to (using
+/// its shared `commondir` when there is one, which is where `info/exclude` lives).
+pub fn git_dir(start: &Path) -> Option<PathBuf> {
+    for dir in start.ancestors() {
+        let dot = dir.join(".git");
+        let Ok(meta) = fs::symlink_metadata(&dot) else { continue };
+        let meta = meta.file_type();
+        if meta.is_dir() {
+            return Some(dot);
+        }
+        if meta.is_file() {
+            let text = fs::read_to_string(&dot).ok()?;
+            let target = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
+            let gd = dir.join(target);
+            let common = fs::read_to_string(gd.join("commondir")).ok().map(|c| gd.join(c.trim()));
+            return Some(common.unwrap_or(gd));
+        }
+    }
+    None
+}
+
+/// Add the handoff file to `.git/info/exclude` (local to this clone, never
+/// committed). Returns Ok(false) when the folder isn't in a git repository.
+pub fn exclude_from_git(cwd: &Path) -> Result<bool> {
+    let Some(gd) = git_dir(cwd) else { return Ok(false) };
+    let info = gd.join("info");
+    fs::create_dir_all(&info)?;
+    let exclude = info.join("exclude");
+    let contents = fs::read(&exclude).unwrap_or_default();
+    let present = contents
+        .split(|b| *b == b'\n')
+        .map(|s| s.strip_suffix(b"\r").unwrap_or(s))
+        .any(|s| s == FILENAME.as_bytes() || s == format!("/{FILENAME}").as_bytes());
+    if !present {
+        let mut file = fs::OpenOptions::new().create(true).append(true).open(&exclude)?;
+        if !contents.is_empty() && !contents.ends_with(b"\n") {
+            file.write_all(b"\n")?;
+        }
+        file.write_all(FILENAME.as_bytes())?;
+        file.write_all(b"\n")?;
+    }
+    Ok(true)
 }

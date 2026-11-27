@@ -195,11 +195,18 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    destination CLIs for the most recent source session within two hours. Gemini
    is a destination. The sticky preview reads only the selected local log and
    accepts edits. Native code binds confirmation to that preview's folder and
-   destination, saves under 1,500 words to `.aiuc-handoff.md`, updates an existing
-   `.gitignore`, copies to the clipboard, and launches the CLI in that folder.
-   Windows prefers Windows Terminal and falls back to PowerShell. macOS uses
-   Terminal.app. Linux uses wl-copy/xclip and x-terminal-emulator/xterm.
-   Fixture tests cover both source formats. Native launches need hands-on testing.
+   destination, saves under 1,500 words to `.aiuc-handoff.md`, lists that file in
+   the repo's `.git/info/exclude` (never the tracked `.gitignore`; worktrees and
+   subfolders handled), copies to the clipboard, and launches the CLI in that folder.
+   CLI lookup (`handoff::executable`) checks PATH plus common install folders
+   (Homebrew, npm global, nvm, Volta, bun, ~/.local/bin, %APPDATA%\npm) and, on
+   macOS, the login shell — GUI apps there get a minimal PATH. Results are cached
+   for 60 s because the snapshot asks every few seconds.
+   Windows: the command is passed as `-EncodedCommand` with single-quoted literal
+   paths (no env vars: Windows Terminal tabs don't inherit them); Windows Terminal
+   first, then a new PowerShell console. macOS uses Terminal.app. Linux uses
+   wl-copy/xclip and x-terminal-emulator/xterm.
+   Fixture tests cover both source formats. Verified on Windows by the owner: TBD.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).
