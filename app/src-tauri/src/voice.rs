@@ -16,12 +16,15 @@ impl Listening {
     }
 }
 
+/// Start listening. `live` gets the words so far as you speak (for captions).
 #[cfg(windows)]
-pub fn start() -> Result<Listening, String> {
+pub fn start(live: impl Fn(String) + Send + Sync + 'static) -> Result<Listening, String> {
     use windows::Foundation::TypedEventHandler;
     use windows::Media::SpeechRecognition::{
-        SpeechContinuousRecognitionResultGeneratedEventArgs, SpeechContinuousRecognitionSession, SpeechRecognitionResultStatus, SpeechRecognizer,
+        SpeechContinuousRecognitionResultGeneratedEventArgs, SpeechContinuousRecognitionSession, SpeechRecognitionHypothesisGeneratedEventArgs,
+        SpeechRecognitionResultStatus, SpeechRecognizer,
     };
+    let live = Arc::new(live);
     // WinRT objects live on one thread, which owns the session until told to stop.
     let text = Arc::new(Mutex::new(Vec::<String>::new()));
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
@@ -37,12 +40,25 @@ pub fn start() -> Result<Listening, String> {
                 return Err(windows::core::Error::new(windows::core::HRESULT(0x80045509u32 as i32), "speech setup failed"));
             }
             let session = rec.ContinuousRecognitionSession()?;
-            let sink = collected.clone();
+            // Words as you say them: everything final so far + the current guess.
+            let (sink, live2) = (collected.clone(), live.clone());
+            rec.HypothesisGenerated(&TypedEventHandler::<SpeechRecognizer, SpeechRecognitionHypothesisGeneratedEventArgs>::new(move |_, args| {
+                if let Ok(a) = args.ok() {
+                    if let Ok(t) = a.Hypothesis().and_then(|h| h.Text()) {
+                        let done = sink.lock().map(|v| v.join(" ")).unwrap_or_default();
+                        live2(format!("{done} {t}").trim().to_owned());
+                    }
+                }
+                Ok(())
+            }))?;
+            let (sink, live3) = (collected.clone(), live.clone());
             session.ResultGenerated(&TypedEventHandler::<SpeechContinuousRecognitionSession, SpeechContinuousRecognitionResultGeneratedEventArgs>::new(move |_, args| {
                 if let Ok(a) = args.ok() {
                     if let Ok(t) = a.Result().and_then(|r| r.Text()) {
                         let t = t.to_string();
-                        if !t.trim().is_empty() { if let Ok(mut v) = sink.lock() { v.push(t); } }
+                        if !t.trim().is_empty() {
+                            if let Ok(mut v) = sink.lock() { v.push(t); live3(v.join(" ")); }
+                        }
                     }
                 }
                 Ok(())
@@ -82,6 +98,6 @@ fn explain(code: u32, msg: &str) -> String {
 }
 
 #[cfg(not(windows))]
-pub fn start() -> Result<Listening, String> {
+pub fn start(_live: impl Fn(String) + Send + Sync + 'static) -> Result<Listening, String> {
     Err("Hold-to-talk is on Windows for now. Tap the hotkey and use the mic button instead.".into())
 }

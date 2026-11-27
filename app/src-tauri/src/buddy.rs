@@ -130,7 +130,15 @@ pub fn on_press(app: &AppHandle) {
         // Still the same press, still held: listen.
         if PRESS.load(Ordering::SeqCst) != n || !HELD.load(Ordering::SeqCst) { return; }
         GUIDING.store(false, Ordering::SeqCst);
-        match crate::voice::start() {
+        // Live captions, at most ~12 updates a second.
+        let (app2, last) = (app.clone(), Mutex::new(Instant::now() - Duration::from_secs(1)));
+        let live = move |words: String| {
+            let Ok(mut l) = last.lock() else { return };
+            if l.elapsed() < Duration::from_millis(80) { return; }
+            *l = Instant::now();
+            show(&app2, Buddy { mode: "listening".into(), said: words, ..Default::default() });
+        };
+        match crate::voice::start(live) {
             Ok(l) => {
                 if let Ok(mut slot) = LISTEN.lock() { *slot = Some(l); }
                 show(&app, Buddy { mode: "listening".into(), ..Default::default() });
@@ -147,7 +155,7 @@ pub fn on_release(app: &AppHandle) {
         Some(l) => {
             let app = app.clone();
             std::thread::spawn(move || {
-                show(&app, Buddy { mode: "thinking".into(), ..Default::default() });
+                show(&app, Buddy { mode: "thinking".into(), said: LAST.lock().ok().and_then(|l| l.as_ref().and_then(|v| v.get("said")?.as_str().map(str::to_owned))).unwrap_or_default(), ..Default::default() });
                 match l.finish() {
                     Ok(said) if !said.is_empty() => voice_ask(&app, said),
                     Ok(_) => show(&app, Buddy { mode: "error".into(), text: "I didn't catch that. Hold the keys and speak, then let go.".into(), ..Default::default() }),

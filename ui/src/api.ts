@@ -378,7 +378,8 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       if (!m) return null;
       const base = { said: "how do I turn off notifications in Slack", text: "", cursor: [0.42, 0.3], spots: [], step: 1, id: "", speak: "" };
       if (m === "guide") return { ...base, mode: "guide", text: "Click your profile picture in the top right.", spots: [{ fx: 0.82, fy: 0.12, label: "Profile" }], step: 2 };
-      if (m === "listening") return { ...base, mode: "listening", said: "" };
+      if (m === "listening") return { ...base, mode: "listening", said: "how do I turn off notifications" };
+      if (m === "thinking") return { ...base, mode: "thinking", said: "what's the capital of Australia" };
       return { ...base, mode: "answer", said: "what's the capital of Australia", text: "Canberra. Sydney is bigger, but Canberra has been the capital since 1913." };
     }
     case "last_voice_turn": return null;
