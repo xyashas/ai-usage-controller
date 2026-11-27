@@ -186,11 +186,10 @@ pub fn transcribe_wav(wav_path: &Path, on_status: &dyn Fn(&str)) -> Result<Strin
     if pcm.is_empty() {
         return Ok(String::new());
     }
-    // Pad or trim to 30 seconds (Whisper's fixed input window)
+    // Cap at 30 seconds (Whisper's fixed input window); pcm_to_mel pads short clips
+    // and may return > N_FRAMES (3000), so we slice/pad mel_tensor to exact N_FRAMES.
     if pcm.len() > m::N_SAMPLES {
         pcm.truncate(m::N_SAMPLES);
-    } else if pcm.len() < m::N_SAMPLES {
-        pcm.resize(m::N_SAMPLES, 0.0);
     }
 
     let slot = ENGINE.get_or_init(|| Mutex::new(None));
@@ -198,14 +197,20 @@ pub fn transcribe_wav(wav_path: &Path, on_status: &dyn Fn(&str)) -> Result<Strin
     let loaded = guard.as_mut().ok_or_else(|| "Speech model not loaded".to_string())?;
 
     let mel = audio::pcm_to_mel(&loaded.config, &pcm, &loaded.mel_filters);
-    let mel_len = mel.len();
+    let n_mels = loaded.config.num_mel_bins;
+    let total_frames = mel.len() / n_mels;
     let device = Device::Cpu;
-    let mel_tensor = Tensor::from_vec(
-        mel,
-        (1, loaded.config.num_mel_bins, mel_len / loaded.config.num_mel_bins),
-        &device,
-    )
-    .map_err(|e| format!("Mel tensor error: {e}"))?;
+    let raw_mel = Tensor::from_vec(mel, (1, n_mels, total_frames), &device)
+        .map_err(|e| format!("Mel tensor error: {e}"))?;
+    let mel_tensor = if total_frames >= m::N_FRAMES {
+        raw_mel
+            .narrow(2, 0, m::N_FRAMES)
+            .map_err(|e| format!("Mel narrow error: {e}"))?
+    } else {
+        let pad = Tensor::zeros((1, n_mels, m::N_FRAMES - total_frames), m::DTYPE, &device)
+            .map_err(|e| format!("Mel pad error: {e}"))?;
+        Tensor::cat(&[&raw_mel, &pad], 2).map_err(|e| format!("Mel cat error: {e}"))?
+    };
 
     loaded.model.reset_kv_cache();
     let audio_features = loaded
@@ -278,5 +283,26 @@ mod tests {
         assert_eq!(w.len(), 80 * 201);
         assert!(w.iter().all(|&x| x >= 0.0 && x.is_finite()));
         assert!(w.iter().any(|&x| x > 0.0));
+    }
+
+    #[test]
+    fn pcm_to_mel_narrow_fits_whisper_encoder_max_positions() {
+        let filters = slaney_mel_filters(m::SAMPLE_RATE, m::N_FFT, 80);
+        let cfg: Config = serde_json::from_str(
+            r#"{"num_mel_bins":80,"max_source_positions":1500,"d_model":384,"encoder_attention_heads":6,"encoder_layers":4,"vocab_size":51864,"decoder_layers":4,"decoder_attention_heads":6,"max_target_positions":448,"suppress_tokens":[]}"#,
+        ).unwrap();
+        for len in [32_000usize, m::N_SAMPLES] {
+            let pcm = vec![0.01f32; len];
+            let mel = audio::pcm_to_mel(&cfg, &pcm, &filters);
+            let frames = mel.len() / cfg.num_mel_bins;
+            let raw = Tensor::from_vec(mel, (1, cfg.num_mel_bins, frames), &Device::Cpu).unwrap();
+            let fixed = if frames >= m::N_FRAMES {
+                raw.narrow(2, 0, m::N_FRAMES).unwrap()
+            } else {
+                let pad = Tensor::zeros((1, cfg.num_mel_bins, m::N_FRAMES - frames), m::DTYPE, &Device::Cpu).unwrap();
+                Tensor::cat(&[&raw, &pad], 2).unwrap()
+            };
+            assert_eq!(fixed.dims3().unwrap(), (1, 80, m::N_FRAMES));
+        }
     }
 }
