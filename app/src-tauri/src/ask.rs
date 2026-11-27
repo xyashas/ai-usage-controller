@@ -26,6 +26,30 @@ fn children() -> &'static Mutex<HashMap<String, Child>> {
     C.get_or_init(Default::default)
 }
 
+pub fn set_captured(c: Captured) {
+    if let Ok(mut slot) = captured().lock() { *slot = c; }
+}
+
+pub fn captured_now() -> Captured {
+    captured().lock().map(|c| c.clone()).unwrap_or_default()
+}
+
+/// Everything an ask needs: which tools can answer, the first pick, the
+/// prompt (with the screen context and, for work questions, your AI work) and
+/// the image to attach. `extra` is added to the request (e.g. "answer briefly").
+pub fn prepare(state: &AppState, question: &str, action: Action, history: &[Turn], extra: &str) -> Option<(Vec<Room>, Pick, String, Option<std::path::PathBuf>)> {
+    let c = captured_now();
+    let rooms = rooms(state);
+    let pick = ask::pick(&rooms, None)?;
+    let work = ask::about_work(question).then(|| {
+        state.last.lock().ok().and_then(|l| l.clone()).map(|s| ask::work_brief(&s, &failures(state), chrono::Utc::now()))
+    }).flatten();
+    let ctx = context_for(&c, current_repo(state));
+    let q = if extra.is_empty() { question.to_owned() } else { format!("{question}\n\n({extra})") };
+    let prompt = ask::build_prompt(&q, action, &ctx, history, work.as_deref());
+    Some((rooms, pick, prompt, c.screenshot.clone().or(c.clipboard_image.clone())))
+}
+
 /// Called from the hotkey: look at what's on screen, then open the Ask box.
 pub fn on_hotkey(app: &AppHandle) {
     let app = app.clone();
@@ -257,34 +281,54 @@ pub fn ask_start(app: AppHandle, state: State<AppState>, req: AskRequest) -> Cmd
             council(&app, &req, &rooms, &prompt, image.as_deref());
             return;
         }
-        // If a tool can't answer (not signed in, out of room), the next one with room tries.
-        let mut rooms = rooms;
-        let mut pick = pick;
-        let mut skipped: Vec<String> = vec![];
-        let (answer, error) = loop {
-            let (answer, error) = run_one(&app, &req.id, pick.tool, req.mode, &prompt, image.as_deref());
-            let Some(e) = error.as_deref() else { break (answer, error) };
-            if !answer.trim().is_empty() || e == "Stopped." { break (answer, error); }
-            // Any failure: the next tool with room tries. Lasting ones are remembered.
-            let failure = ask::classify(e);
-            match failure {
-                ask::Failure::Unsupported => mark_broken_for(pick.tool, 24 * 3600),
-                ask::Failure::Other => {}
-                _ => mark_broken_for(pick.tool, 600),
-            }
-            skipped.push(if failure == ask::Failure::Other { format!("{} failed ({}).", crate::tool_name(pick.tool), e.trim_start_matches(&format!("{}: ", crate::tool_name(pick.tool))).chars().take(120).collect::<String>()) } else { ask::explain_failure(pick.tool, failure) });
-            if let Some(r) = rooms.iter_mut().find(|r| r.tool == pick.tool) { r.installed = false; }
-            match ask::pick(&rooms, None) {
-                Some(next) => pick = next,
-                None => break (answer, Some(skipped.join(" "))),
-            }
-        };
-        let reason = if skipped.is_empty() { pick.reason.clone() } else { skipped.join(" ") };
+        let a = answer(Some(&app), &req.id, rooms, pick, req.mode, &prompt, image.as_deref());
+        let (answer, error, pick, reason) = (a.text, a.error, a.pick, a.reason);
         let (points, text) = if action == Action::Point { ask::parse_points(&answer) } else { (vec![], answer.trim().to_owned()) };
-        if !points.is_empty() { if let Some(s) = shot { show_points(&app, s, &points); } }
+        if !points.is_empty() { if let Some(s) = shot { crate::buddy::point(&app, s, &points, &text); } }
         let _ = app.emit("ask-done", Done { id: req.id.clone(), tool: Some(pick.tool), reason, error, points, text, opened_web: false });
     });
     Ok(())
+}
+
+pub struct Answered {
+    pub text: String,
+    pub error: Option<String>,
+    /// The tool that answered (or tried last).
+    pub pick: Pick,
+    /// Why that tool, or why others were skipped.
+    pub reason: String,
+}
+
+/// Ask `pick`; if it can't answer (not signed in, out of room, any error with
+/// no answer), the next tool with room tries. With `app`, the answer streams
+/// as `ask-delta` events under `id`.
+pub fn answer(app: Option<&AppHandle>, id: &str, mut rooms: Vec<Room>, mut pick: Pick, mode: Mode, prompt: &str, image: Option<&std::path::Path>) -> Answered {
+    let mut skipped: Vec<String> = vec![];
+    loop {
+        let (text, error) = run_cli(app, id, pick.tool, mode, prompt, image);
+        let failed = match error.as_deref() {
+            Some(e) if text.trim().is_empty() && e != "Stopped." => e.to_owned(),
+            _ => {
+                let reason = if skipped.is_empty() { pick.reason.clone() } else { skipped.join(" ") };
+                return Answered { text, error, reason, pick };
+            }
+        };
+        let failure = ask::classify(&failed);
+        match failure {
+            ask::Failure::Unsupported => mark_broken_for(pick.tool, 24 * 3600),
+            ask::Failure::Other => {}
+            _ => mark_broken_for(pick.tool, 600),
+        }
+        let prefix = format!("{}: ", crate::tool_name(pick.tool));
+        skipped.push(if failure == ask::Failure::Other {
+            format!("{} failed ({}).", crate::tool_name(pick.tool), failed.trim_start_matches(prefix.as_str()).chars().take(120).collect::<String>())
+        } else { ask::explain_failure(pick.tool, failure) });
+        if let Some(r) = rooms.iter_mut().find(|r| r.tool == pick.tool) { r.installed = false; }
+        match ask::pick(&rooms, None) {
+            Some(next) => pick = next,
+            None => return Answered { text, error: Some(skipped.join(" ")), reason: String::new(), pick },
+        }
+    }
 }
 
 /// All installed tools answer at once; then the one with most room combines them.
@@ -364,50 +408,11 @@ pub async fn ask_open_in(tool: Tool, text: String) -> CmdResult<String> {
     }).await.map_err(err)?
 }
 
-// ---------- pointing ----------
-
-/// Draw arrows over the screen where the answer points, for a few seconds.
-fn show_points(app: &AppHandle, shot: capture::ShotRect, points: &[ask::Point]) {
-    #[derive(Serialize, Clone)]
-    struct Spot { fx: f64, fy: f64, label: String }
-    let spots: Vec<Spot> = points.iter().map(|p| Spot {
-        fx: (p.x / shot.img_width.max(1) as f64).clamp(0.0, 1.0),
-        fy: (p.y / shot.img_height.max(1) as f64).clamp(0.0, 1.0),
-        label: p.label.clone(),
-    }).collect();
-    let app2 = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let win = match app2.get_webview_window("pointer") {
-            Some(w) => w,
-            None => match tauri::WebviewWindowBuilder::new(&app2, "pointer", tauri::WebviewUrl::App("index.html?overlay=pointer".into()))
-                .title("AI Usage Controller pointer").decorations(false).transparent(true).always_on_top(true)
-                .skip_taskbar(true).resizable(false).shadow(false).focused(false).visible(false).build() {
-                Ok(w) => w,
-                Err(_) => return,
-            },
-        };
-        let _ = win.set_ignore_cursor_events(true);
-        let _ = win.set_position(tauri::PhysicalPosition::new(shot.x, shot.y));
-        let _ = win.set_size(tauri::PhysicalSize::new(shot.width, shot.height));
-        crate::window::mac_float(&win);
-        let _ = win.show();
-        if let Ok(mut l) = LAST_SPOTS.lock() { *l = serde_json::to_value(&spots).unwrap_or_default(); }
-        let _ = app2.emit_to("pointer", "points", &spots);
-    });
-}
-
-static LAST_SPOTS: Mutex<serde_json::Value> = Mutex::new(serde_json::Value::Null);
-
-/// The pointer overlay asks for its arrows when it loads (the first event can
-/// arrive before the page is ready).
-#[tauri::command]
-pub fn ask_points() -> serde_json::Value {
-    LAST_SPOTS.lock().map(|l| l.clone()).unwrap_or_default()
-}
+// ---------- pointing (drawn by buddy.rs) ----------
 
 #[tauri::command]
 pub fn ask_hide_points(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("pointer") { let _ = w.hide(); }
+    crate::buddy::hide(&app);
 }
 
 // ---------- prompt polish (Gemini's polish.rs) ----------

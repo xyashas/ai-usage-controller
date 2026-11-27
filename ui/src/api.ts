@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, Suggestion, Watch } from "./types";
+import type { BuddyState, VoiceTurn, AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, Suggestion, Watch } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -29,7 +29,9 @@ export const api = {
   askCopy: (text: string) => call<void>("ask_copy", { text }),
   askRun: (command: string) => call<string>("ask_run", { command }),
   askOpenIn: (tool: Tool, text: string) => call<string>("ask_open_in", { tool, text }),
-  askPoints: () => call<{ fx: number; fy: number; label: string }[] | null>("ask_points"),
+  buddyState: () => call<BuddyState | null>("buddy_state"),
+  buddyHide: () => call<void>("buddy_hide"),
+  lastVoiceTurn: () => call<VoiceTurn | null>("last_voice_turn"),
   askHidePoints: () => call<void>("ask_hide_points"),
   answerApproval: (id: string, answer: ApprovalAnswer) => call<void>("answer_approval", { id, answer }),
   verifyTask: (id: number) => call<void>("verify_task", { id }),
@@ -113,10 +115,10 @@ export async function onAsk(delta: (id: string, text: string) => void, done: (d:
 
 let mockAskListeners: { delta: (id: string, text: string) => void; done: (d: AskDone) => void }[] = [];
 
-export async function onPoints(cb: (spots: { fx: number; fy: number; label: string }[]) => void): Promise<() => void> {
+export async function onBuddy(cb: (b: BuddyState) => void): Promise<() => void> {
   if (!inTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
-  return listen<{ fx: number; fy: number; label: string }[]>("points", (e) => cb(e.payload));
+  return listen<BuddyState>("buddy", (e) => cb(e.payload));
 }
 
 export async function onSuggestion(cb: (s: Suggestion) => void): Promise<() => void> {
@@ -371,6 +373,15 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       repo: "acme-web", pick: { tool: (args!.pinned as Tool) ?? "codex", reason: args!.pinned ? "your pick" : "Claude is at 96%" }, installed: ["claude_code", "codex", "gemini"],
     };
     case "ask_start": mockAnswer(args!.req as AskRequest); return null;
+    case "buddy_state": {
+      const m = new URLSearchParams(location.search).get("buddy");
+      if (!m) return null;
+      const base = { said: "how do I turn off notifications in Slack", text: "", cursor: [0.42, 0.3], spots: [], step: 1, id: "", speak: "" };
+      if (m === "guide") return { ...base, mode: "guide", text: "Click your profile picture in the top right.", spots: [{ fx: 0.82, fy: 0.12, label: "Profile" }], step: 2 };
+      if (m === "listening") return { ...base, mode: "listening", said: "" };
+      return { ...base, mode: "answer", said: "what's the capital of Australia", text: "Canberra. Sydney is bigger, but Canberra has been the capital since 1913." };
+    }
+    case "last_voice_turn": return null;
     case "ask_run": return "Typed into a new terminal. Check it, then press Enter.";
     case "ask_open_in": return "Sent to Claude Code in the Claude app";
     case "answer_approval": dismissed.add(`approval:${args!.id}`); return null;

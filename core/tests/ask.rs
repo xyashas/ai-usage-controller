@@ -112,3 +112,17 @@ fn failures_are_classified_so_another_tool_can_answer() {
     assert!(ask::explain_failure(Tool::Gemini, Failure::Unsupported).contains("GEMINI_API_KEY"));
     assert!(ask::explain_failure(Tool::Gemini, Failure::SignedOut).contains("Login with Google"));
 }
+
+#[test]
+fn guide_steps_are_parsed() {
+    assert!(ask::wants_guide("How do I change my wallpaper?"));
+    assert!(ask::wants_guide("guide me to the billing page"));
+    assert!(!ask::wants_guide("what is a closure"));
+    let s = ask::parse_guide("Click the **Settings** gear in the top right.\n<point x=\"1500\" y=\"40\" label=\"Settings\"/>");
+    assert_eq!((s.done, s.say.as_str()), (false, "Click the **Settings** gear in the top right."));
+    assert_eq!(s.point.unwrap().label, "Settings");
+    let d = ask::parse_guide("DONE: Notifications are off.");
+    assert_eq!((d.done, d.say.as_str(), d.point), (true, "Notifications are off.", None));
+    let p = ask::guide_prompt("turn off sync", &["Opened Settings".into()], std::path::Path::new("/tmp/s.png"), Some((800, 600)), Some("Chrome"));
+    assert!(p.contains("1. Opened Settings") && p.contains("800×600") && p.contains("DONE:"));
+}

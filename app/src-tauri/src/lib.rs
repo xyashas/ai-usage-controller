@@ -1,6 +1,7 @@
 mod agents;
 mod ask;
 mod autosend;
+mod buddy;
 mod capture;
 mod clipboard_watch;
 mod watch;
@@ -8,6 +9,7 @@ mod claude_web;
 mod dispatch;
 mod hover;
 mod handoff;
+mod voice;
 mod window;
 
 use aiuc_core::model::Tool;
@@ -781,13 +783,16 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        // Ask looks at your screen first, before the widget takes focus.
-                        let ask_key = ask::ASK_HOTKEY.parse::<tauri_plugin_global_shortcut::Shortcut>().ok();
-                        if ask_key.is_some_and(|k| k.id() == shortcut.id()) {
-                            ask::on_hotkey(app);
-                            return;
+                    // Ask: tap to open (it looks at your screen first), hold to talk.
+                    let ask_key = ask::ASK_HOTKEY.parse::<tauri_plugin_global_shortcut::Shortcut>().ok();
+                    if ask_key.is_some_and(|k| k.id() == shortcut.id()) {
+                        match event.state() {
+                            ShortcutState::Pressed => buddy::on_press(app),
+                            ShortcutState::Released => buddy::on_release(app),
                         }
+                        return;
+                    }
+                    if event.state() == ShortcutState::Pressed {
                         if let Some(w) = window::widget(app) {
                             let _ = w.show();
                             let _ = w.set_focus();
@@ -841,7 +846,9 @@ pub fn run() {
             ask::ask_copy,
             ask::ask_run,
             ask::ask_open_in,
-            ask::ask_points,
+            buddy::buddy_state,
+            buddy::buddy_hide,
+            buddy::last_voice_turn,
             ask::ask_hide_points,
             ask::polish_prompt,
             agents::answer_approval,

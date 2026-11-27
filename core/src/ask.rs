@@ -470,3 +470,56 @@ pub fn wants_pointing(q: &str) -> bool {
     ["where do i", "where is", "where's", "where can i", "how do i turn", "how do i find", "how do i open", "how do i change", "show me where", "which button", "where to click"]
         .iter().any(|w| q.contains(w))
 }
+
+// ---------- guide me (step by step, on screen) ----------
+
+/// "How do I…", "guide me", "walk me through…": show it on screen, step by step.
+pub fn wants_guide(q: &str) -> bool {
+    let l = q.to_lowercase();
+    wants_pointing(q) || ["guide me", "walk me through", "show me how", "how do i ", "how can i ", "help me find", "take me to"].iter().any(|w| l.contains(w))
+}
+
+/// One step of a guided task.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct GuideStep {
+    /// The goal is reached.
+    pub done: bool,
+    /// One short sentence to show and say.
+    pub say: String,
+    pub point: Option<Point>,
+}
+
+pub fn guide_prompt(goal: &str, done_steps: &[String], screenshot: &Path, size: Option<(u32, u32)>, window: Option<&str>) -> String {
+    let dims = size.map(|(w, h)| format!(" It is {w}×{h} pixels; (0,0) is the top-left corner.")).unwrap_or_default();
+    let mut p = format!(
+        "You are a friendly tutor guiding the user through a task on their computer, one step at a time, by pointing at the screen.\n\
+         Their goal: {}\n",
+        clip(goal, 500)
+    );
+    if let Some(w) = window { p.push_str(&format!("They are in: {}\n", clip(w, 200))); }
+    if !done_steps.is_empty() {
+        p.push_str("Steps they've already done:\n");
+        for (i, s) in done_steps.iter().enumerate() { p.push_str(&format!("{}. {}\n", i + 1, clip(s, 200))); }
+    }
+    p.push_str(&format!(
+        "Look at the current screenshot at {}.{dims}\n\
+         Reply with exactly ONE next step: a short instruction (at most 15 words), then on its own line a marker \
+         <point x=\"…\" y=\"…\" label=\"…\"/> at the centre of the thing to click or look at, in screenshot pixels.\n\
+         If the thing isn't visible, tell them what to do to reveal it (scroll, open a menu) and point at the closest thing.\n\
+         If the goal is already done, reply exactly: DONE: <one short sentence>\n\
+         Don't run tools or change anything; only answer.\n",
+        screenshot.display()
+    ));
+    p
+}
+
+pub fn parse_guide(answer: &str) -> GuideStep {
+    let (points, text) = parse_points(answer);
+    let t = text.trim().trim_matches('*').trim();
+    if let Some(rest) = t.strip_prefix("DONE").or_else(|| t.strip_prefix("Done:")) {
+        let say = rest.trim_start_matches([':', ' ', '-']).trim();
+        return GuideStep { done: true, say: if say.is_empty() { "All done.".into() } else { say.to_owned() }, point: None };
+    }
+    let say = t.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ' ').to_owned();
+    GuideStep { done: false, say, point: points.into_iter().next() }
+}

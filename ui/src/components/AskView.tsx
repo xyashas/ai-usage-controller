@@ -120,6 +120,15 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
 
+  // Just asked out loud? Carry that conversation on here.
+  useEffect(() => {
+    if (init) return;
+    api.lastVoiceTurn().then((v) => {
+      if (!v || !v.answer) return;
+      setItems((all) => all.length ? all : [{ id: "voice", question: v.question, action: "ask", label: v.question, answer: { text: v.answer, done: { id: "voice", tool: v.tool, reason: v.reason, error: null, points: [], text: v.answer, opened_web: false } } }]);
+    }, () => {});
+  }, []);
+
   const loadCtx = (p: Tool | null) => api.askContext(p).then(setCtx, () => setCtx(null));
   useEffect(() => { loadCtx(pinned); }, [pinned]);
   useEffect(() => { api.focus().finally(() => box.current?.focus({ preventScroll: true })); }, []);

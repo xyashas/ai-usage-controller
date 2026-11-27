@@ -229,3 +229,11 @@ export interface Suggestion {
   detail: string;
   action: "ask_fix" | "send_failure" | "handoff";
 }
+
+// ---------- the on-screen buddy ----------
+export interface BuddySpot { fx: number; fy: number; label: string }
+export interface BuddyState {
+  mode: "listening" | "thinking" | "answer" | "guide" | "done" | "error" | "hide";
+  said: string; text: string; cursor: [number, number]; spots: BuddySpot[]; step: number; id: string; speak: string;
+}
+export interface VoiceTurn { question: string; answer: string; tool: Tool | null; reason: string }

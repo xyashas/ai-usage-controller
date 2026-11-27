@@ -345,7 +345,7 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    roomiest combines them (Agree / Differ / Best answer). **Pointing**: "where do I…"
    with a screenshot asks for `<point x y label/>` markers; `parse_points` maps them
    to fractions of the captured window and a click-through `pointer` webview window
-   (`index.html?overlay=pointer`) draws rings there for 20 s. Unverified: marker
+   (now the `buddy` overlay, see 1k) draws them. Unverified: marker
    accuracy per model. **Actions**: Replace / Paste reply (refocus the original
    window, Ctrl/Cmd+V), Copy, Run in terminal (new shell in the repo, command pasted
    not run), Fix it with an agent / Make it a task (prefills the Agents box), Open in
@@ -358,6 +358,22 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    repo's newest failed-test tail, `watch::tick` runs every worker tick, and
    "aiuc-ask" window events from chips are handled in App.tsx (fix → Ask,
    send_failure → Agents box, handoff → Handoff tab).
+1k. **Hold to talk + on-screen buddy** (Claude: `app/src-tauri/src/{voice,buddy}.rs`,
+   `ui/src/components/Buddy.tsx`, `ask::{wants_guide,guide_prompt,parse_guide}`).
+   The Ask hotkey now reports press and release: a tap (< 320 ms) opens Ask as
+   before; holding starts Windows' own speech recognizer (WinRT
+   `SpeechRecognizer` continuous dictation on its own COM thread; needs Settings →
+   Privacy → Speech → Online speech recognition, the error says so). Release →
+   transcript → `voice_ask`: captures the screen, then either answers in a bubble
+   by the cursor (Quick, 1–3 sentences, streamed via `ask-delta` id `voice-…`,
+   read aloud by the overlay's Web Speech) or, for "how do I…/guide me…", runs the
+   guide loop: screenshot → `guide_prompt` → one step + `<point/>` → the buddy
+   pointer flies there → wait for a left click (Windows `GetAsyncKeyState`; 8 s on
+   other OSes) → look again, up to 10 steps or `DONE:`. A tap stops a guide. The
+   overlay is a click-through `buddy` webview window sized to the cursor's monitor;
+   points on a window screenshot are mapped to monitor fractions. The last voice
+   turn (3 min) is loaded into the Ask panel on the next tap. `ask::answer` is the
+   shared "try the next tool" runner used by Ask, voice and guide. Mac voice later.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).
