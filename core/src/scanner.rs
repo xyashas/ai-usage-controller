@@ -65,13 +65,15 @@ pub fn candidate_files(tool: Tool, roots: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
-fn mtime_secs(p: &Path) -> i64 {
-    std::fs::metadata(p)
-        .and_then(|m| m.modified())
+fn file_stat(p: &Path) -> Option<(u64, i64)> {
+    let m = std::fs::metadata(p).ok()?;
+    let mtime = m
+        .modified()
         .ok()
         .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+        .unwrap_or(0);
+    Some((m.len(), mtime))
 }
 
 pub fn scan_tool(store: &mut Store, prices: &PriceTable, tool: Tool, roots: &[PathBuf]) -> Result<ScanReport> {
@@ -79,8 +81,9 @@ pub fn scan_tool(store: &mut Store, prices: &PriceTable, tool: Tool, roots: &[Pa
     for path in candidate_files(tool, roots) {
         rep.files_seen += 1;
         let key = path.to_string_lossy().to_string();
-        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        let mtime = mtime_secs(&path);
+        let Some((size, mtime)) = file_stat(&path) else {
+            continue;
+        };
         let prev = store.cursor(&key)?.unwrap_or_default();
         if prev.size == size && prev.mtime == mtime && size > 0 {
             continue;
@@ -92,7 +95,8 @@ pub fn scan_tool(store: &mut Store, prices: &PriceTable, tool: Tool, roots: &[Pa
 
         match tool {
             Tool::Gemini => {
-                let content = std::fs::read_to_string(&path).unwrap_or_default();
+                let Ok(bytes) = std::fs::read(&path) else { continue };
+                let content = String::from_utf8_lossy(&bytes);
                 items = gemini::parse_file(&content, &stem);
                 cursor.offset = size;
             }
@@ -105,10 +109,10 @@ pub fn scan_tool(store: &mut Store, prices: &PriceTable, tool: Tool, roots: &[Pa
                     start = 0;
                     codex_ctx = codex::CodexCtx::default();
                 }
-                let mut f = File::open(&path)?;
-                f.seek(SeekFrom::Start(start))?;
+                let Ok(mut f) = File::open(&path) else { continue };
+                if f.seek(SeekFrom::Start(start)).is_err() { continue; }
                 let mut buf = Vec::new();
-                f.read_to_end(&mut buf)?;
+                if f.read_to_end(&mut buf).is_err() { continue; }
                 let last_nl = buf.iter().rposition(|b| *b == b'\n');
                 let consumed = match last_nl {
                     Some(i) => i + 1,

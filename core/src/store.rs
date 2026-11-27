@@ -33,6 +33,7 @@ fn from_ms(v: i64) -> DateTime<Utc> {
 
 const SCHEMA: &str = r#"
 PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
 CREATE TABLE IF NOT EXISTS events (
   dedup_key   TEXT PRIMARY KEY,
   tool        TEXT NOT NULL,
@@ -52,11 +53,13 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_tool_ts ON events(tool, ts);
 CREATE INDEX IF NOT EXISTS events_session ON events(session_id, ts);
 CREATE INDEX IF NOT EXISTS events_synced ON events(synced);
+CREATE INDEX IF NOT EXISTS events_kind_ts ON events(kind, ts);
 CREATE TABLE IF NOT EXISTS gauges (
   tool TEXT NOT NULL, window TEXT NOT NULL, ts INTEGER NOT NULL,
   used_pct REAL NOT NULL, resets_at INTEGER, window_minutes INTEGER, source TEXT NOT NULL,
   PRIMARY KEY (tool, window, ts)
 );
+CREATE INDEX IF NOT EXISTS gauges_ts ON gauges(ts);
 CREATE TABLE IF NOT EXISTS cursors (
   path TEXT PRIMARY KEY, offset INTEGER NOT NULL, size INTEGER NOT NULL, mtime INTEGER NOT NULL, ctx TEXT
 );
@@ -71,6 +74,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS savings (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, amount REAL NOT NULL, note TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS savings_ts ON savings(ts);
 "#;
 
 /// Columns added after a table first shipped. Errors mean "already there".
@@ -78,6 +82,10 @@ fn migrate(conn: &Connection) {
     for col in ["dest TEXT", "queued_until INTEGER", "worktree INTEGER NOT NULL DEFAULT 0", "verify TEXT", "verify_at INTEGER", "verify_secs REAL"] {
         let _ = conn.execute(&format!("ALTER TABLE tasks ADD COLUMN {col}"), []);
     }
+    let _ = conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS tasks_open_created ON tasks(dismissed, created_at);
+         CREATE INDEX IF NOT EXISTS tasks_queued ON tasks(dismissed, queued_until);",
+    );
 }
 
 impl Store {
@@ -89,6 +97,31 @@ impl Store {
         conn.execute_batch(SCHEMA)?;
         migrate(&conn);
         Ok(Store { conn })
+    }
+
+    /// Open the database, verifying integrity. If the file is corrupt, back it
+    /// up alongside its WAL/SHM files and start fresh (returns `recovered = true`).
+    pub fn open_or_recover(path: &Path) -> Result<(Store, bool)> {
+        if let Ok(store) = Self::open(path) {
+            let ok = store
+                .conn
+                .query_row("PRAGMA quick_check(1)", [], |r| r.get::<_, String>(0))
+                .map(|s| s.eq_ignore_ascii_case("ok"))
+                .unwrap_or(false);
+            if ok {
+                return Ok((store, false));
+            }
+        }
+        let stamp = Utc::now().timestamp();
+        for suffix in ["", "-wal", "-shm"] {
+            let src = std::path::PathBuf::from(format!("{}{}", path.display(), suffix));
+            if src.exists() {
+                let dst = std::path::PathBuf::from(format!("{}.corrupt.{}{}", path.display(), stamp, suffix));
+                let _ = std::fs::rename(&src, &dst);
+            }
+        }
+        let fresh = Self::open(path)?;
+        Ok((fresh, true))
     }
 
     pub fn open_in_memory() -> Result<Store> {

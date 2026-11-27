@@ -31,6 +31,7 @@ pub struct Engine {
     allowances: HashMap<(Tool, &'static str), (f64, Source)>,
     allowances_at: Option<DateTime<Utc>>,
     audit_cache: Option<(DateTime<Utc>, Vec<AuditResult>, f64)>,
+    weekly_recap_cache: Option<(DateTime<Utc>, crate::recap::WeeklyRecap)>,
     /// Where agent hooks report status and approvals (see agent_status.rs).
     /// None for in-memory test engines.
     pub status_dir: Option<PathBuf>,
@@ -44,12 +45,21 @@ fn basename(p: &Option<String>) -> Option<String> {
 
 impl Engine {
     pub fn with_store(store: Store) -> Engine {
-        let settings = store
-            .kv_get("settings")
-            .ok()
-            .flatten()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+        let settings = match store.kv_get("settings").ok().flatten() {
+            Some(raw) => match serde_json::from_str(&raw) {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    let _ = store.kv_set("settings_corrupt_backup", &raw);
+                    let _ = store.kv_set("recovered_settings", "1");
+                    let def = Settings::default();
+                    if let Ok(j) = serde_json::to_string(&def) {
+                        let _ = store.kv_set("settings", &j);
+                    }
+                    def
+                }
+            },
+            None => Settings::default(),
+        };
         let prices = store
             .kv_get("prices_json")
             .ok()
@@ -74,6 +84,7 @@ impl Engine {
             allowances: HashMap::new(),
             allowances_at: None,
             audit_cache: None,
+            weekly_recap_cache: None,
             status_dir: None,
         }
     }
@@ -86,6 +97,20 @@ impl Engine {
         let mut e = Self::open(&crate::paths::app_data_dir().join("usage.db"))?;
         e.status_dir = Some(crate::agent_status::dir());
         Ok(e)
+    }
+
+    pub fn open_or_recover(path: &Path) -> Result<(Engine, bool)> {
+        let (store, recovered) = Store::open_or_recover(path)?;
+        if recovered {
+            let _ = store.kv_set("recovered_db", "1");
+        }
+        Ok((Self::with_store(store), recovered))
+    }
+
+    pub fn open_default_or_recover() -> Result<(Engine, bool)> {
+        let (mut e, recovered) = Self::open_or_recover(&crate::paths::app_data_dir().join("usage.db"))?;
+        e.status_dir = Some(crate::agent_status::dir());
+        Ok((e, recovered))
     }
 
     pub fn in_memory() -> Result<Engine> {
@@ -103,6 +128,7 @@ impl Engine {
     pub fn invalidate(&mut self) {
         self.allowances_at = None;
         self.audit_cache = None;
+        self.weekly_recap_cache = None;
     }
 
     /// Replace the price/plan tables with the backend's copy (no app release needed).
@@ -322,6 +348,9 @@ impl Engine {
             total.events += r.events;
             total.gauges += r.gauges;
         }
+        if total.events > 0 || total.gauges > 0 {
+            self.weekly_recap_cache = None;
+        }
         Ok(total)
     }
 
@@ -504,7 +533,7 @@ impl Engine {
             let binding = windows
                 .iter()
                 .filter(|w| w.source != Source::Learning)
-                .min_by(|a, b| a.headroom_pct.partial_cmp(&b.headroom_pct).unwrap());
+                .min_by(|a, b| a.headroom_pct.total_cmp(&b.headroom_pct));
             let headroom = binding.map(|w| w.headroom_pct);
             let source = binding.map(|w| w.source).unwrap_or(Source::Learning);
             let color = match headroom {
@@ -600,7 +629,7 @@ impl Engine {
         }
         let top_session = by_session
             .iter()
-            .max_by(|a, b| a.1 .0.partial_cmp(&b.1 .0).unwrap())
+            .max_by(|a, b| a.1 .0.total_cmp(&b.1 .0))
             .map(|((tool, sid), (c, p))| SessionCost { tool: *tool, session_id: sid.clone(), project_name: basename(p), cost_usd: *c });
         let today = TodayStats {
             cost_usd: all_today.iter().map(|e| e.cost_usd).sum(),
@@ -677,7 +706,7 @@ impl Engine {
             } else {
                 continue;
             };
-            let w = t.windows.iter().filter(|w| w.source != Source::Learning).min_by(|a, b| a.headroom_pct.partial_cmp(&b.headroom_pct).unwrap());
+            let w = t.windows.iter().filter(|w| w.source != Source::Learning).min_by(|a, b| a.headroom_pct.total_cmp(&b.headroom_pct));
             let resets = w.and_then(|w| w.resets_at).map(|r| r.timestamp()).unwrap_or(0);
             let id = format!("low:{}:{}:{}:{}", t.tool.as_str(), w.map(|w| w.key.as_str()).unwrap_or(""), level, resets);
             if self.dismissed(&id) {
@@ -686,7 +715,7 @@ impl Engine {
             let alt = tools
                 .iter()
                 .filter(|o| o.tool != t.tool && o.detected && o.enabled && o.headroom_pct.unwrap_or(0.0) >= 30.0)
-                .max_by(|a, b| a.headroom_pct.partial_cmp(&b.headroom_pct).unwrap());
+                .max_by(|a, b| a.headroom_pct.unwrap_or(-1.0).total_cmp(&b.headroom_pct.unwrap_or(-1.0)));
             let action = match alt {
                 Some(a) if ent.paid() => AlertAction { kind: "switch".into(), label: format!("Switch to {}", a.label), target_tool: Some(a.tool) },
                 _ => AlertAction { kind: "dismiss".into(), label: "Dismiss".into(), target_tool: None },
@@ -760,7 +789,14 @@ impl Engine {
         }
         let gemini_allowance = self.gemini_daily_allowance();
         snap.daily_recap = crate::recap::build_daily_recap(&self.store, &snap.tools, gemini_allowance, self.settings.show_daily_recap, now)?;
-        snap.weekly_recap = crate::recap::build_weekly_recap(&self.store, &snap.tools, gemini_allowance, now)?;
+        snap.weekly_recap = match &self.weekly_recap_cache {
+            Some((at, cached)) if now - *at < Duration::seconds(60) && now >= *at => cached.clone(),
+            _ => {
+                let w = crate::recap::build_weekly_recap(&self.store, &snap.tools, gemini_allowance, now)?;
+                self.weekly_recap_cache = Some((now, w.clone()));
+                w
+            }
+        };
         if self.settings.suggest_chips {
             snap.suggestions = crate::suggest::from_snapshot(&snap, now);
         }
@@ -994,7 +1030,8 @@ impl Engine {
         crate::recap::dismiss_daily_recap(&self.store, now)
     }
 
-    pub fn record_handoff(&self, now: DateTime<Utc>) -> Result<()> {
+    pub fn record_handoff(&mut self, now: DateTime<Utc>) -> Result<()> {
+        self.weekly_recap_cache = None;
         crate::recap::record_handoff(&self.store, now)
     }
 }

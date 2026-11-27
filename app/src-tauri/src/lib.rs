@@ -142,7 +142,7 @@ async fn launch_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>
         let draft = guard.as_ref().filter(|d| d.id == id).ok_or("Preview this session again.")?;
         let auto = engine.lock().map_err(err)?.settings.auto_send;
         let msg = handoff::launch(draft.cwd.as_deref(), draft.target, dest, &prompt, auto)?;
-        if let Ok(eng) = engine.lock() { let _ = eng.record_handoff(Utc::now()); }
+        if let Ok(mut eng) = engine.lock() { let _ = eng.record_handoff(Utc::now()); }
         *guard = None;
         Ok(msg)
     }).await.map_err(err)?
