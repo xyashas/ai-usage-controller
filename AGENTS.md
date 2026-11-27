@@ -207,6 +207,10 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    first, then a new PowerShell console. macOS uses Terminal.app. Linux uses
    wl-copy/xclip and x-terminal-emulator/xterm.
    Fixture tests cover both source formats. Verified on Windows by the owner: TBD.
+   **Test handoff** (Check setup): `Engine::test_handoff_offers` offers the latest
+   Claude Code/Codex session from the last 24 h whatever the usage; the preview
+   command accepts `test: true` and validates against that list instead of the
+   snapshot. Same preview → confirm → launch path as the real handoff.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).

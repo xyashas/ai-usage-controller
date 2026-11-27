@@ -66,15 +66,21 @@ struct Preview {
 }
 
 #[tauri::command]
-async fn preview_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>, source: Tool, session: String, target: Tool) -> CmdResult<Preview> {
+async fn preview_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>, source: Tool, session: String, target: Tool, test: Option<bool>) -> CmdResult<Preview> {
     if window.label() != "widget" { return Err("Open the widget to preview a handoff.".into()); }
     let engine = state.engine.clone();
     let pending = state.handoff.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let roots = {
             let mut eng = engine.lock().map_err(err)?;
-            let snap = eng.snapshot(Utc::now()).map_err(err)?;
-            if !snap.handoffs.iter().any(|o| o.source == source && o.session == session && o.targets.contains(&target)) {
+            // Test mode (Check setup) offers the latest session whatever the usage;
+            // otherwise the offer must come from the live snapshot.
+            let offers = if test.unwrap_or(false) {
+                eng.test_handoff_offers(Utc::now()).map_err(err)?
+            } else {
+                eng.snapshot(Utc::now()).map_err(err)?.handoffs
+            };
+            if !offers.iter().any(|o| o.source == source && o.session == session && o.targets.contains(&target)) {
                 return Err("The session or available destination changed.".into());
             }
             eng.roots(source)
@@ -85,6 +91,11 @@ async fn preview_handoff(window: tauri::WebviewWindow, state: State<'_, AppState
         *pending.lock().map_err(err)? = Some(PendingHandoff { id, cwd, target });
         Ok(Preview { id, prompt })
     }).await.map_err(err)?
+}
+
+#[tauri::command]
+fn test_handoff_offers(state: State<AppState>) -> CmdResult<Vec<aiuc_core::snapshot::HandoffOffer>> {
+    state.engine.lock().map_err(err)?.test_handoff_offers(Utc::now()).map_err(err)
 }
 
 #[tauri::command]
@@ -535,6 +546,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             preview_handoff,
+            test_handoff_offers,
             launch_handoff,
             get_settings,
             save_settings,

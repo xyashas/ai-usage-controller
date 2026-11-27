@@ -190,8 +190,8 @@ export default function App() {
     if (v !== "panel") api.focus();
   };
 
-  function preview(offer: HandoffOffer, target: Tool) {
-    const request = api.previewHandoff(offer.source, offer.session, target);
+  function preview(offer: HandoffOffer, target: Tool, test = false) {
+    const request = api.previewHandoff(offer.source, offer.session, target, test);
     setDraft({ source: offer.source, target, preview: request });
     goto("handoff");
   }
@@ -237,7 +237,7 @@ export default function App() {
             ) : view === "audit" ? (
               <AuditCard snap={snap} onBack={() => setView("panel")} refresh={refresh} />
             ) : view === "setup" ? (
-              <CheckSetup onBack={() => setView("panel")} />
+              <CheckSetup onBack={() => setView("panel")} onTestHandoff={(offer, target) => preview(offer, target, true)} />
             ) : (
               <Expanded onHandoff={preview} snap={snap} onView={goto} refresh={refresh} />
             )}

@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Alert, Detected, Diagnostics, Plan, Rect, Settings, Snapshot, Tool } from "./types";
+import type { Alert, Detected, Diagnostics, HandoffOffer, Plan, Rect, Settings, Snapshot, Tool } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -13,7 +13,8 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const api = {
-  previewHandoff: (source: Tool, session: string, target: Tool) => call<{ id: number; prompt: string }>("preview_handoff", { source, session, target }),
+  previewHandoff: (source: Tool, session: string, target: Tool, test = false) => call<{ id: number; prompt: string }>("preview_handoff", { source, session, target, test }),
+  testHandoffOffers: () => call<HandoffOffer[]>("test_handoff_offers"),
   launchHandoff: (id: number, prompt: string) => call<void>("launch_handoff", { id, prompt }),
   snapshot: () => call<Snapshot>("get_snapshot"),
   settings: () => call<Settings>("get_settings"),
@@ -184,6 +185,7 @@ const mockPlans: Record<Tool, Plan[]> = {
 
 function mock(cmd: string, args?: Record<string, unknown>): unknown {
   switch (cmd) {
+    case "test_handoff_offers": return [{ source: "claude_code", session: "s", targets: ["codex", "gemini"] }];
     case "preview_handoff": return { id: 1, prompt: "# Session handoff\n\n## Original goal\nFix checkout.\n\n## TODO\n- [ ] Run checkout tests." };
     case "get_snapshot": return mockSnapshot();
     case "get_settings": return structuredClone(mockSettings);

@@ -165,6 +165,24 @@ impl Engine {
         Ok(signed_out && !expired && self.settings.alerts.notifications)
     }
 
+/// The most recent Claude Code or Codex session from the last 24 hours, offered
+    /// whatever the usage. Powers "Test handoff" in Check setup, so the flow can be
+    /// tried without burning a plan limit to 90%.
+    pub fn test_handoff_offers(&self, now: DateTime<Utc>) -> Result<Vec<crate::snapshot::HandoffOffer>> {
+        let mut out = Vec::new();
+        for tool in [Tool::ClaudeCode, Tool::Codex] {
+            if !self.settings.tool(tool).enabled {
+                continue;
+            }
+            let recent = self.store.events(Some(tool), now - Duration::hours(24), now + Duration::seconds(1))?;
+            if let Some(e) = recent.iter().rev().find(|e| e.ts <= now) {
+                let targets = Tool::ALL.into_iter().filter(|o| *o != tool && crate::handoff::cli(*o).is_some()).collect();
+                out.push(crate::snapshot::HandoffOffer { source: tool, session: e.session_id.clone(), targets });
+            }
+        }
+        Ok(out)
+    }
+
     pub fn diagnostics(&self, now: DateTime<Utc>) -> Vec<ToolDiagnostics> {
         let (day_start, day_end) = metrics::local_day_bounds(now);
         Tool::ALL

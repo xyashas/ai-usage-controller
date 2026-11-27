@@ -1,7 +1,8 @@
 import { ToolMark } from "./ToolMark";
 import { useEffect, useState } from "react";
-import type { Diagnostics, ToolDiagnostics } from "../types";
+import type { Diagnostics, HandoffOffer, Tool, ToolDiagnostics } from "../types";
 import { api } from "../api";
+import { toolName } from "./HandoffPreview";
 import { ago } from "../format";
 import { BackIcon, Check } from "./icons";
 import { ClaudeConnect } from "./ClaudeConnect";
@@ -76,8 +77,12 @@ function ToolCard({ t, d }: { t: ToolDiagnostics; d: Diagnostics }) {
   );
 }
 
-export function CheckSetup({ onBack }: { onBack: () => void }) {
+export function CheckSetup({ onBack, onTestHandoff }: { onBack: () => void; onTestHandoff: (offer: HandoffOffer, target: Tool) => void }) {
   const [d, setD] = useState<Diagnostics | null>(null);
+  const [offers, setOffers] = useState<HandoffOffer[] | null>(null);
+  useEffect(() => {
+    api.testHandoffOffers().then(setOffers, () => setOffers([]));
+  }, []);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -127,6 +132,7 @@ export function CheckSetup({ onBack }: { onBack: () => void }) {
       ) : (
         d.tools.map((t) => <ToolCard key={t.tool} t={t} d={d} />)
       )}
+      <TestHandoff offers={offers} onTest={onTestHandoff} />
       <div className="flex gap-2">
         <button onClick={refresh} disabled={busy} className="flex-1 rounded-full bg-fg/10 py-2 text-[12.5px] font-medium hover:bg-fg/15 disabled:opacity-50">
           {busy ? "Refreshing…" : "Refresh now"}
@@ -136,6 +142,39 @@ export function CheckSetup({ onBack }: { onBack: () => void }) {
         </button>
       </div>
       <p className="text-[11px] leading-relaxed text-muted">Hover the pill to open this panel and move away to close it. {navigator.userAgent.includes("Mac") ? "Option" : "Alt"}+A toggles it from anywhere.</p>
+    </div>
+  );
+}
+
+// Try the handoff on your latest session without waiting for a limit to reach 90%.
+function TestHandoff({ offers, onTest }: { offers: HandoffOffer[] | null; onTest: (offer: HandoffOffer, target: Tool) => void }) {
+  if (offers == null) return null;
+  const usable = offers.filter((o) => o.targets.length > 0);
+  return (
+    <div className="space-y-2 rounded-2xl bg-fg/[0.04] p-3.5 ring-1 ring-fg/[0.06]">
+      <p className="text-[13px] font-medium">Test the handoff</p>
+      {usable.length ? (
+        <>
+          <p className="text-[11.5px] leading-relaxed text-muted">
+            Uses your latest session from the last 24 hours, whatever your usage. You see the summary first and nothing runs until you press Continue.
+          </p>
+          {usable.map((o) => (
+            <div key={o.source} className="flex flex-wrap gap-2">
+              {o.targets.map((target) => (
+                <button key={target} onClick={() => onTest(o, target)} className="grow rounded-full bg-fg/10 px-3 py-1.5 text-[12px] font-medium hover:bg-fg/15">
+                  {toolName[o.source]} → {toolName[target]}
+                </button>
+              ))}
+            </div>
+          ))}
+        </>
+      ) : (
+        <p className="text-[11.5px] leading-relaxed text-muted">
+          {offers.length
+            ? "Install Codex, Gemini CLI or Claude Code to have somewhere to hand off to."
+            : "No Claude Code or Codex session on this computer in the last 24 hours. Use one in a project folder first (claude.ai chats can't be handed off)."}
+        </p>
+      )}
     </div>
   );
 }

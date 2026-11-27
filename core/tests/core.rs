@@ -736,3 +736,24 @@ fn handoff_eligibility_covers_both_sources_and_expires_after_cutoff() {
         }
     }
 }
+
+#[test]
+fn test_handoff_offers_latest_session_whatever_the_usage() {
+    let now = t("2026-11-26T12:00:00Z");
+    // 20% used: no real offer, but the test offer is there for the latest session.
+    let gauge = codex_gauge(now, 20.0, now + Duration::hours(3));
+    let mut eng = engine_with(
+        vec![
+            ev(Tool::Codex, EventKind::Assistant, now - Duration::hours(5), "old", 0.1),
+            ev(Tool::Codex, EventKind::Assistant, now - Duration::hours(3), "latest", 0.1),
+        ],
+        vec![gauge],
+    );
+    eng.settings.primary_tool = Some(Tool::Codex);
+    assert!(eng.snapshot(now).unwrap().handoffs.is_empty());
+    let offers = eng.test_handoff_offers(now).unwrap();
+    let codex = offers.iter().find(|o| o.source == Tool::Codex).expect("codex offer");
+    assert_eq!(codex.session, "latest");
+    // Nothing older than a day.
+    assert!(eng.test_handoff_offers(now + Duration::hours(25)).unwrap().is_empty());
+}
