@@ -306,3 +306,11 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
   project names (sync sends counts only — there's a test for this). Keep it that way.
 - New core logic gets a test in `core/tests/core.rs`.
 - Commit messages: imperative summary line, then bullets of what/why.
+
+## Multi-agent coordination & branching (Codex, Claude, Gemini)
+
+All coding agents (Codex, Claude, Gemini) share this repo and may build in parallel. Follow these rules so work stays synced and merges stay clean:
+
+- **One short-lived branch per task:** Never push directly to `main` or to another agent's active branch. Always `git fetch origin` first, branch off the latest integration base (`main` once PR #3 and PR #4 are merged; until then, `codex/bidirectional-handoff`), and name the branch `<agent>/<short-task>` (e.g. `claude/day-one-audit`, `gemini/limit-breakdown`, `codex/task-queue`).
+- **Parallel work & hotspot hygiene:** Before editing, check `git branch -r` and open PRs to see what another agent is touching. Avoid concurrent edits to shared hotspots (`core/src/engine.rs`, `ui/src/App.tsx`, `app/src-tauri/src/lib.rs`) when possible; put new logic in dedicated modules/components and keep wiring diffs minimal.
+- **Sync via PRs and docs:** Run the relevant tests before pushing, update `AGENTS.md` (and `.aiuc/handoff.md` if used) when you change architecture, gotchas, or roadmap items, and open a PR against the integration base so the owner can review and merge cleanly. Never force-push or rebase another agent's branch.
