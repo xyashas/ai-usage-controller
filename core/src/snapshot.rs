@@ -102,8 +102,16 @@ pub struct Alert {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct GaugePoint {
+    pub at: i64,
+    pub used: f64,
+    pub reset_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
     pub generated_at: DateTime<Utc>,
+    pub gauge_history: Vec<GaugePoint>,
     pub idle_hidden: bool,
     pub onboarded: bool,
     pub entitlements: Entitlements,

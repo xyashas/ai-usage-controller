@@ -1,3 +1,4 @@
+import { ToolMark } from "./ToolMark";
 import type { Snapshot } from "../types";
 import { api } from "../api";
 import { usd } from "../format";
@@ -13,17 +14,17 @@ export function AuditCard({ snap, onBack, refresh }: { snap: Snapshot; onBack: (
   const paid = snap.audit.reduce((s, a) => s + a.current_price, 0);
   const best = [...snap.audit].sort((a, b) => b.monthly_saving_usd - a.monthly_saving_usd)[0];
   return (
-    <div className="flex flex-col gap-3.5 p-5">
-      <button onClick={onBack} className="self-start text-[12px] text-white/50 hover:text-white">← Back</button>
-      <div className="text-[11px] uppercase tracking-wide text-white/50">Monthly plan audit</div>
+    <div className="flex flex-col gap-4 p-4">
+      <button onClick={onBack} className="self-start text-[12px] text-muted hover:text-fg">← Back</button>
+      <div className="text-[11px] uppercase tracking-wide text-muted">Monthly plan audit</div>
       {best ? (
         <>
           <h2 className="text-[18px] font-semibold leading-snug">{best.headline}</h2>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {snap.audit.map((a) => (
               <div key={a.tool} className="flex justify-between text-[12.5px]">
-                <span className="text-white/80">{LABEL[a.tool]} · {a.current_plan}</span>
-                <span className="tabular text-white/50">{a.peak_used_pct != null ? `${Math.round(a.peak_used_pct)}% peak · ` : ""}{usd(a.current_price, 0)}/mo</span>
+                <span className="flex items-center gap-2 text-fg"><ToolMark tool={a.tool} />{LABEL[a.tool]} · {a.current_plan}</span>
+                <span className="tabular text-muted">{a.peak_used_pct != null ? `${Math.round(a.peak_used_pct)}% peak · ` : ""}{usd(a.current_price, 0)}/mo</span>
               </div>
             ))}
             <div className="flex justify-between border-t border-line pt-1.5 text-[12.5px]">
@@ -31,21 +32,21 @@ export function AuditCard({ snap, onBack, refresh }: { snap: Snapshot; onBack: (
               <span className="tabular font-semibold">{usd(paid, 0)}/mo</span>
             </div>
           </div>
-          <ul className="space-y-1 text-[11.5px] text-white/50">
+          <ul className="space-y-1 text-[11.5px] text-muted">
             {best.reasoning.map((r) => <li key={r}>· {r}</li>)}
           </ul>
           {(best.action === "downgrade" || best.action === "cancel" || best.action === "upgrade") && (
             <button
               onClick={async () => { await api.acceptAudit(best.tool); refresh(); onBack(); }}
-              className="rounded-full bg-accent py-2.5 text-[14px] font-semibold text-black"
+              className="rounded-full bg-accent py-2.5 text-[14px] font-semibold text-canvas"
             >
               {best.action === "cancel" ? `I cancelled ${LABEL[best.tool]}` : `I switched to ${best.target_plan}`}
             </button>
           )}
-          <p className="text-[11px] text-white/50">You make the change with the vendor; we record the estimated saving.</p>
+          <p className="text-[11px] text-muted">You make the change with the vendor; we record the estimated saving.</p>
         </>
       ) : (
-        <p className="text-[13px] text-white/50">Pick your plans in Settings to get a monthly audit.</p>
+        <p className="text-[13px] text-muted">Pick your plans in Settings to get a monthly audit.</p>
       )}
     </div>
   );

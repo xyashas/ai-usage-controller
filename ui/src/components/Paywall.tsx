@@ -29,10 +29,10 @@ export function Paywall({ snap, onBack, refresh }: { snap: Snapshot; onBack: () 
   }
 
   return (
-    <div className="flex flex-col gap-3.5 p-5">
-      <button onClick={onBack} className="self-start text-[12px] text-white/50 hover:text-white">← Back</button>
+    <div className="flex flex-col gap-4 p-4">
+      <button onClick={onBack} className="self-start text-[12px] text-muted hover:text-fg">← Back</button>
       <h2 className="text-[19px] font-semibold leading-tight">{headline}</h2>
-      <ul className="space-y-1.5 text-[13px] text-white/85">
+      <ul className="space-y-2 text-[13px] text-fg">
         <li>⏱ Time left before cutoff, at your pace</li>
         <li>🔀 All tools side by side, with "switch to" advice</li>
         <li>🛑 Runaway-loop alerts and a live session meter</li>
@@ -40,28 +40,28 @@ export function Paywall({ snap, onBack, refresh }: { snap: Snapshot; onBack: () 
       </ul>
 
       {snap.entitlements.trial_available && (
-        <button onClick={async () => { await api.startTrial(); refresh(); onBack(); }} className="rounded-full bg-accent py-2.5 text-[14px] font-semibold text-black">
+        <button onClick={async () => { await api.startTrial(); refresh(); onBack(); }} className="rounded-full bg-accent py-2.5 text-[14px] font-semibold text-canvas">
           Start 7-day free trial · no card
         </button>
       )}
       <div className="grid grid-cols-2 gap-2">
-        <button onClick={() => api.openUrl(CHECKOUT_ANNUAL)} className="rounded-xl bg-white/10 px-3 py-2.5 text-left ring-1 ring-accent/50 hover:bg-white/15">
+        <button onClick={() => api.openUrl(CHECKOUT_ANNUAL)} className="rounded-xl bg-fg/10 px-3 py-2.5 text-left ring-1 ring-accent/50 hover:bg-fg/15">
           <div className="text-[13px] font-semibold">$79 / year</div>
           <div className="text-[11px] text-ok">2 months free</div>
         </button>
-        <button onClick={() => api.openUrl(CHECKOUT_MONTHLY)} className="rounded-xl bg-white/5 px-3 py-2.5 text-left ring-1 ring-white/[0.08] hover:bg-white/10">
+        <button onClick={() => api.openUrl(CHECKOUT_MONTHLY)} className="rounded-xl bg-fg/5 px-3 py-2.5 text-left ring-1 ring-fg/[0.08] hover:bg-fg/10">
           <div className="text-[13px] font-semibold">$9 / month</div>
-          <div className="text-[11px] text-white/50">cancel anytime</div>
+          <div className="text-[11px] text-muted">cancel anytime</div>
         </button>
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         <div className="flex gap-2">
-          <input onFocus={() => api.focus()} value={key} onChange={(e) => setKey(e.target.value)} placeholder="Have a licence key?" className="min-w-0 flex-1 rounded-lg bg-white/[0.06] px-3 py-2 text-[12.5px] outline-none ring-1 ring-white/[0.08] focus:ring-accent" />
-          <button disabled={!key || busy} onClick={activate} className="rounded-lg bg-white/10 px-3 text-[12.5px] disabled:opacity-40">Activate</button>
+          <input onFocus={() => api.focus()} value={key} onChange={(e) => setKey(e.target.value)} placeholder="Have a licence key?" className="min-w-0 flex-1 rounded-lg bg-fg/[0.06] px-3 py-2 text-[12.5px] outline-none ring-1 ring-fg/[0.08] focus:ring-accent" />
+          <button disabled={!key || busy} onClick={activate} className="rounded-lg bg-fg/10 px-3 text-[12.5px] disabled:opacity-40">Activate</button>
         </div>
         {err && <p className="text-[11.5px] text-bad">{err}</p>}
-        <p className="text-[11px] text-white/50">14-day refunds, no questions. Savings are estimates.</p>
+        <p className="text-[11px] text-muted">14-day refunds, no questions. Savings are estimates.</p>
       </div>
     </div>
   );

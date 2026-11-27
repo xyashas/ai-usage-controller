@@ -611,3 +611,25 @@ fn idle_pill_uses_logged_activity_and_increases_in_web_usage() {
     }
     assert!(eng.snapshot(later + Duration::minutes(32)).unwrap().idle_hidden);
 }
+
+#[test]
+fn history_tracks_only_the_binding_window_inside_the_last_day() {
+    let now = t("2026-11-26T12:00:00Z");
+    let reset = now + Duration::hours(1);
+    let mut gauges = vec![
+        codex_gauge(now - Duration::hours(25), 50.0, reset),
+        codex_gauge(now - Duration::hours(2), 93.0, now - Duration::hours(1)),
+        codex_gauge(now - Duration::seconds(20), 20.0, reset),
+        codex_gauge(now - Duration::seconds(10), 25.0, reset),
+    ];
+    let mut weekly = codex_gauge(now, 5.0, now + Duration::days(6));
+    weekly.window = "weekly".into();
+    gauges.push(weekly);
+    let mut eng = engine_with(vec![ev(Tool::Codex, EventKind::Assistant, now, "a", 0.1)], gauges);
+    eng.settings.primary_tool = Some(Tool::Codex);
+    let history = eng.snapshot(now).unwrap().gauge_history;
+    assert_eq!(history.len(), 2);
+    approx(history[0].used, 93.0);
+    approx(history[1].used, 25.0);
+    assert_eq!(history[0].reset_at, Some((now - Duration::hours(1)).timestamp_millis()));
+}

@@ -105,7 +105,7 @@ macOS universal + Windows installers uploaded as artifacts
 
 ### Widget window (`app/src-tauri/src/window.rs`, `hover.rs`, `ui/src/App.tsx`)
 - **One fixed-size transparent window (420×600) pinned top-centre. It never
-  resizes.** The pill and panel are one black "surface" that morphs with CSS
+  resizes.** The pill and panel are one shared "surface" that morphs with CSS
   transitions. (Earlier versions resized the window and raced with a
   ResizeObserver, leaving a huge oval on screen — don't go back to that.)
 - The window is click-through except the shape's rectangle. The UI reports the
@@ -120,6 +120,21 @@ macOS universal + Windows installers uploaded as artifacts
 - Typing needs keyboard focus: inputs call `api.focus()` on focus.
 - macOS: window level 25 (above menu bar), all Spaces; notch height from
   `NSScreen.safeAreaInsets`.
+
+### Widget appearance and usage history
+- The native 420×600 window stays fixed. CSS animates the surface to its measured
+  view height. The OS selects the panel palette. A collapsed Mac notch stays black
+  in both themes and uses a small usage ring. Other pills use a horizontal meter.
+- The pill counts to its next percentage and only pulses for red alerts. Reduced
+  motion disables transitions, pulses and counting. Hidden layers are inert,
+  Tab reaches the visible controls, Enter activates them and Esc returns to the pill.
+- The main meter's sparkline uses the last 24 hours of stored samples for its
+  binding window after tier gating. Five-minute buckets retain window changes.
+  Dashed ticks mark elapsed reset times from the samples. Long gaps are left open.
+  Tools without gauge history omit the chart.
+- Preview a view directly with `?view=panel|settings|setup|paywall|audit|onboarding`.
+  Use `?platform=macos&notch=32` for a notched Mac, and `?scenario=empty|learning`
+  to check the first-use states.
 
 ### Desktop lifecycle
 - Launch at login defaults on once onboarding is complete, including existing
@@ -161,6 +176,10 @@ GitHub CI passed the desktop lifecycle core tests on Windows, macOS, and Linux,
 the UI production build, and the Linux desktop compile check. Tests cover stale
 and offline readings, expiry recovery, and idle boundaries. OS login, tray interaction, notifications, and idle wake still
 need hands-on verification on Windows and macOS.
+
+At 2× device scale, the browser mock was checked in dark and light mode for the
+pill and all six panel views across normal, low, critical, runaway and unconnected
+scenarios on Free and Pro. Keyboard and contrast checks used Chromium.
 
 Not yet verified: Mac notch placement on real hardware; Codex and Gemini parsers
 against real logs (fixtures only); runaway alert and model nudge in real use;

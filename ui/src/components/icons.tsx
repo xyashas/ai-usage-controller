@@ -26,7 +26,7 @@ export function BackIcon() {
 }
 
 export function Check({ ok }: { ok: boolean | null }) {
-  if (ok == null) return <span className="inline-block h-4 w-4 rounded-full border border-white/20" aria-hidden />;
+  if (ok == null) return <span className="inline-block h-4 w-4 rounded-full border border-fg/20" aria-hidden />;
   return ok ? (
     <span className="flex h-4 w-4 items-center justify-center rounded-full bg-ok/20 text-ok" aria-label="OK">
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5 9-10" /></svg>
