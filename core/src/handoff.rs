@@ -23,7 +23,7 @@ pub fn extra_dirs(home: Option<&Path>) -> Vec<PathBuf> {
     #[cfg(not(windows))]
     dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
     if let Some(h) = home {
-        for rel in [".local/bin", ".npm-global/bin", ".volta/bin", ".bun/bin", ".claude/local", "scoop/shims"] {
+        for rel in [".local/bin", ".npm-global/bin", ".volta/bin", ".bun/bin", ".claude/local", ".claude/bin", "scoop/shims"] {
             dirs.push(h.join(rel));
         }
         // nvm: the newest installed Node's bin folder.
@@ -34,8 +34,13 @@ pub fn extra_dirs(home: Option<&Path>) -> Vec<PathBuf> {
         dirs.extend(nvm.into_iter().rev());
     }
     #[cfg(windows)]
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        dirs.push(PathBuf::from(appdata).join("npm"));
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            dirs.push(PathBuf::from(appdata).join("npm"));
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(PathBuf::from(local).join("Programs").join("claude"));
+        }
     }
     dirs
 }

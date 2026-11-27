@@ -58,6 +58,10 @@ pub fn on_hotkey(app: &AppHandle) {
         let shots = app.state::<AppState>().engine.lock().map(|e| e.settings.ask_screenshots).unwrap_or(true);
         capture::clean_temp();
         let c = capture::capture(shots);
+        diag(&format!(
+            "ask hotkey capture: sel={} clip={} clip_img={} shot={}",
+            c.selection.is_some(), c.clipboard.is_some(), c.clipboard_image.is_some(), c.screenshot.is_some()
+        ));
         if let Ok(mut slot) = captured().lock() { *slot = c; }
         if let Some(w) = crate::window::widget(&app) {
             let _ = w.show();
@@ -374,10 +378,14 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
     }
     let mut reader = StreamReader::default();
     let mut answer = String::new();
+    let mut lines_seen = 0usize;
+    let mut deltas_emitted = 0usize;
     if let Some(out) = stdout {
         for line in BufReader::new(out).lines().map_while(Result::ok) {
+            lines_seen += 1;
             if let Some(piece) = reader.line(tool, &line) {
                 started.store(true, AO::SeqCst);
+                deltas_emitted += 1;
                 answer.push_str(&piece);
                 if let Some(app) = app { let _ = app.emit("ask-delta", Delta { id, text: &piece }); }
             }
@@ -401,9 +409,10 @@ fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &s
         }
         None
     });
+    let bin = cmd.program.file_name().and_then(|n| n.to_str()).unwrap_or("?");
     diag(&format!(
-        "ask {} {:?} {:.1}s exit={:?} answer_chars={} error={}",
-        tool.as_str(), mode, t0.elapsed().as_secs_f32(), exit, answer.chars().count(),
+        "ask {} {:?} bin={} {:.1}s exit={:?} lines={} deltas={} answer_chars={} error={}",
+        tool.as_str(), mode, bin, t0.elapsed().as_secs_f32(), exit, lines_seen, deltas_emitted, answer.chars().count(),
         error.as_deref().unwrap_or("-").chars().take(200).collect::<String>(),
     ));
     (answer, error)
@@ -414,8 +423,15 @@ pub fn ask_start(app: AppHandle, state: State<AppState>, req: AskRequest) -> Cmd
     let c = captured().lock().map_err(err)?.clone();
     // "Remember that I use TypeScript", "save this": no AI needed.
     if req.history.is_empty() {
-        if let Some(r) = handle_note(&state, &ask::voice_intent(&req.question, false), &c) {
-            let (text, error) = match r { Ok(t) => (t, None), Err(e) => (String::new(), Some(e)) };
+        let intent = ask::voice_intent(&req.question, false);
+        if let Some(r) = handle_note(&state, &intent, &c) {
+            let (text, error) = match r {
+                Ok(t) => {
+                    if matches!(intent, ask::Intent::Save(_)) { let _ = app.emit("inbox-changed", ()); }
+                    (t, None)
+                }
+                Err(e) => (String::new(), Some(e)),
+            };
             let _ = app.emit("ask-done", Done { id: req.id, text, error, reason: "noted".into(), ..Default::default() });
             return Ok(());
         }
@@ -436,7 +452,7 @@ pub fn ask_start(app: AppHandle, state: State<AppState>, req: AskRequest) -> Cmd
     let Some(pick) = ask::pick(&rooms, req.tool) else {
         // No CLI: open the web app with the question pasted in.
         let target = req.tool.unwrap_or(Tool::ClaudeCode);
-        let text = if req.question.trim().is_empty() { prompt.clone() } else { format!("{}\n\n{}", req.question, ctx.selection.clone().unwrap_or_default()) };
+        let text = if req.question.trim().is_empty() { prompt.clone() } else { format!("{}\n\n{}", req.question, ctx.selection.clone().or_else(|| ctx.clipboard.clone()).unwrap_or_default()) };
         let msg = handoff::start_task(None, target, handoff::Dest::Web, text.trim(), true).map(|(m, _)| m).unwrap_or_else(|e| e);
         let _ = app.emit("ask-done", Done { id: req.id, tool: Some(target), reason: msg, opened_web: true, ..Default::default() });
         return Ok(());

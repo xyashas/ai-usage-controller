@@ -249,6 +249,13 @@ fn voice_ask(app: &AppHandle, said: String) {
     let state = app.state::<AppState>();
     let last = last_answer();
     let intent = ask::voice_intent(&said, last.is_some());
+    let intent_kind = match &intent {
+        Intent::Paste { .. } => "paste", Intent::Copy => "copy", Intent::Redo(_) => "redo",
+        Intent::Send(_) => "send", Intent::Repeat => "repeat", Intent::Stop => "stop",
+        Intent::Remember(_) => "remember", Intent::Forget(_) => "forget",
+        Intent::Save(_) => "save", Intent::Ask => "ask",
+    };
+    app_ask::diag(&format!("voice intent: {intent_kind} has_last={}", last.is_some()));
     match (&intent, last) {
         (Intent::Stop, _) => { GUIDING.store(false, Ordering::SeqCst); hide(app); }
         (Intent::Paste { code_only }, Some(l)) => {
@@ -284,7 +291,10 @@ fn voice_ask(app: &AppHandle, said: String) {
         (Intent::Remember(_) | Intent::Forget(_) | Intent::Save(_), _) => {
             let c = capture::capture(false);
             match app_ask::handle_note(&state, &intent, &c) {
-                Some(Ok(msg)) => confirm(app, said, msg, false),
+                Some(Ok(msg)) => {
+                    if matches!(intent, Intent::Save(_)) { let _ = app.emit("inbox-changed", ()); }
+                    confirm(app, said, msg, false)
+                }
                 Some(Err(e)) => fail(app, said, e),
                 None => {}
             }

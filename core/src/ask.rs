@@ -289,6 +289,9 @@ pub struct StreamReader {
     /// Claude: text already shown from partial deltas, so the final message
     /// isn't added twice.
     streamed: bool,
+    /// Claude: whether any text has been emitted across deltas or assistant blocks
+    /// (if false when "result" arrives, emit the result text as a fallback).
+    emitted: bool,
     /// Codex: deltas seen for the current message.
     codex_delta: bool,
     pub error: Option<String>,
@@ -304,8 +307,10 @@ impl StreamReader {
                     "stream_event" => {
                         let d = v.pointer("/event/delta")?;
                         if d.get("type").and_then(Value::as_str) == Some("text_delta") {
+                            let piece = d.get("text").and_then(Value::as_str)?;
                             self.streamed = true;
-                            return d.get("text").and_then(Value::as_str).map(str::to_owned);
+                            if !piece.is_empty() { self.emitted = true; }
+                            return Some(piece.to_owned());
                         }
                         None
                     }
@@ -313,12 +318,25 @@ impl StreamReader {
                         let text: String = v.pointer("/message/content")?.as_array()?.iter()
                             .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
                             .filter_map(|b| b.get("text").and_then(Value::as_str)).collect();
-                        (!text.is_empty()).then_some(text)
+                        if !text.is_empty() {
+                            self.emitted = true;
+                            Some(text)
+                        } else {
+                            None
+                        }
                     }
                     "assistant" => { self.streamed = false; Some("\n\n".into()) }
                     "result" => {
                         if v.get("is_error").and_then(Value::as_bool) == Some(true) {
                             self.error = v.get("result").and_then(Value::as_str).map(str::to_owned).or(Some("Claude couldn't answer.".into()));
+                            return None;
+                        }
+                        if !self.emitted {
+                            let text = v.get("result").and_then(Value::as_str).unwrap_or("");
+                            if !text.is_empty() {
+                                self.emitted = true;
+                                return Some(text.to_owned());
+                            }
                         }
                         None
                     }

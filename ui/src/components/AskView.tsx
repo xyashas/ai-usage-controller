@@ -200,7 +200,10 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
   const setItems = (f: Item[] | ((all: Item[]) => Item[])) => setSession((s) => ({ items: typeof f === "function" ? f(s.items) : f }));
   const setBusy = (b: string | null) => setSession(() => ({ busy: b }));
   const [mode, setMode] = useState<AskMode>(pref("mode", "quick") as AskMode);
-  const [pinned, setPinned] = useState<Tool | null>((pref("tool", "") || null) as Tool | null);
+  const [pinned, setPinned] = useState<Tool | null>(() => {
+    const saved = pref("tool", "");
+    return saved && saved !== "gemini" ? (saved as Tool) : null;
+  });
   const [council, setCouncil] = useState(false);
   const [voice, setVoice] = useState(pref("voice", "0") === "1");
   const box = useRef<HTMLTextAreaElement>(null);
@@ -396,7 +399,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
           onFocus={() => api.focus()}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(text); } }}
-          placeholder={items.length ? "Ask a follow-up…" : ctx?.selection || ctx?.screenshot ? "Ask about this, or pick an action" : "Ask anything. Try: What are my agents doing?"}
+          placeholder={items.length ? "Ask a follow-up…" : ctx?.selection || ctx?.clipboard || ctx?.screenshot ? "Ask about this, or pick an action" : "Ask anything. Try: What are my agents doing?"}
           className="block w-full resize-none bg-transparent px-4 pb-1.5 pt-3 text-[13.5px] leading-relaxed outline-none placeholder:text-mute"
           style={{ outline: "none" }}
         />
@@ -424,7 +427,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
           {busy ? (
             <button className="btn ml-auto !py-1.5" onClick={stop}>Stop</button>
           ) : (
-            <button disabled={!text.trim() && !(items.length === 0 && (ctx?.selection || ctx?.screenshot))} className="btn btn-primary !py-1.5" onClick={() => ask(text)}>
+            <button disabled={!text.trim() && !(items.length === 0 && (ctx?.selection || ctx?.clipboard || ctx?.screenshot))} className="btn btn-primary !py-1.5" onClick={() => ask(text)}>
               Ask <span className="text-[10.5px] font-medium opacity-50">↵</span>
             </button>
           )}
