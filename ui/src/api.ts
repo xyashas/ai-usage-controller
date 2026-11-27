@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
+import type { Alert, Suggestion, Watch, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -50,6 +50,10 @@ export const api = {
   diagnostics: () => call<Diagnostics>("diagnostics"),
   dismiss: (id: string) => call<void>("dismiss_alert", { id }),
   dismissDailyRecap: () => call<void>("dismiss_daily_recap"),
+  polishPrompt: (text: string, repo: string | null) => call<string>("polish_prompt", { text, repo }),
+  addWatch: (text: string) => call<Watch>("add_watch", { text }),
+  listWatches: () => call<Watch[]>("list_watches"),
+  removeWatch: (id: string) => call<void>("remove_watch", { id }),
   alertAction: (alert: Alert) => call<string>("alert_action", { id: alert.id }),
   acceptNudge: () => call<void>("accept_nudge"),
   acceptAudit: (tool: Tool) => call<void>("accept_audit", { tool }),
@@ -83,6 +87,18 @@ export async function onHover(cb: (inside: boolean) => void): Promise<() => void
   if (!inTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<boolean>("hover", (e) => cb(e.payload));
+}
+
+export async function onSuggestion(cb: (s: Suggestion) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<Suggestion>("suggestion", (e) => cb(e.payload));
+}
+
+export async function onWatchesChanged(cb: () => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("watches-changed", () => cb());
 }
 
 export async function onOpenView(cb: (v: string) => void): Promise<() => void> {
@@ -122,8 +138,13 @@ let mockSettings: Settings = {
   approvals: true,
   verify_done: true,
   show_daily_recap: true,
+  polish_auto: false,
+  suggest_chips: true,
 };
 const dismissed = new Set<string>();
+let mockWatches: Watch[] = [
+  { id: "w-1", condition: { kind: "limit_reset", tool: "claude_code" }, label: "When Claude resets", created_at: inMin(-15) },
+];
 let mockGithub: string | null = null;
 const extra = { queued_until: null, verify: null, verify_secs: null, verify_at: null } as const;
 const mockAgents: Snapshot["agents"] = mockScenario === "empty" ? [] : [
@@ -231,6 +252,9 @@ function mockSnapshot(): Snapshot {
       handoffs_count: 3,
       total_limit_hits: 2,
     } : { tools: [], busiest_hours: [], hourly_requests: Array(24).fill(0), handoffs_count: 0, total_limit_hits: 0 },
+    suggestions: mockSettings.suggest_chips && mockScenario === "critical" ? [
+      { id: "limit-mid-task:claude_code:codex", kind: { kind: "limit_mid_task", tool: "claude_code", to: "codex" }, title: "Hand off to Codex?", detail: "Claude at 96% mid-task", action: "handoff" },
+    ] : [],
   };
 }
 
@@ -311,6 +335,20 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     ];
     case "dismiss_alert": dismissed.add(args!.id as string); return null;
     case "dismiss_daily_recap": dismissed.add("daily_recap"); return null;
+    case "polish_prompt": {
+      const raw = String(args!.text ?? "").trim();
+      const repoLabel = args!.repo ? ` in ${String(args!.repo).split(/[\\/]/).pop()}` : "";
+      return `${raw}${repoLabel}. Keep edits scoped to the affected files, follow AGENTS.md conventions, and verify the relevant tests and build pass before finishing.`;
+    }
+    case "list_watches": return [...mockWatches];
+    case "add_watch": {
+      const label = String(args!.text ?? "").trim();
+      if (!label) throw new Error("Couldn't understand that watch.");
+      const w: Watch = { id: `w-${Date.now()}`, condition: { kind: "at", at: inMin(20) }, label, created_at: now().toISOString() };
+      mockWatches = [...mockWatches, w];
+      return w;
+    }
+    case "remove_watch": mockWatches = mockWatches.filter((w) => w.id !== args!.id); return null;
     case "accept_nudge": dismissed.add("nudge"); return null;
     case "alert_action": dismissed.add(args!.id as string); return "ok";
     case "start_trial": mockTier = "trial"; return null;

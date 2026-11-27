@@ -83,6 +83,7 @@ export interface Snapshot {
   remote: { today_cost_all_devices: number; month_cost_all_devices: number; devices: number } | null;
   daily_recap: DailyRecap | null;
   weekly_recap: WeeklyRecap;
+  suggestions: Suggestion[];
 }
 
 export interface Plan { id: string; name: string; price: number; capacity: number; metered?: boolean; daily_requests?: number | null }
@@ -104,6 +105,8 @@ export interface Settings {
   approvals: boolean;
   verify_done: boolean;
   show_daily_recap: boolean;
+  polish_auto: boolean;
+  suggest_chips: boolean;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
 export type Mode = "collapsed" | "expanded";
@@ -191,4 +194,25 @@ export interface WeeklyRecap {
   hourly_requests: number[];
   handoffs_count: number;
   total_limit_hits: number;
+}
+
+export type WatchCondition =
+  | { kind: "limit_reset"; tool: Tool }
+  | { kind: "limit_below"; tool: Tool; used_pct: number }
+  | { kind: "agent_done"; task_id: number }
+  | { kind: "agent_needs_you"; task_id: number | null }
+  | { kind: "tests_pass"; task_id: number }
+  | { kind: "at"; at: string };
+export interface Watch { id: string; condition: WatchCondition; label: string; created_at: string }
+
+export type SuggestionKind =
+  | { kind: "copied_error" }
+  | { kind: "tests_failed"; task_id: number }
+  | { kind: "limit_mid_task"; tool: Tool; to: Tool };
+export interface Suggestion {
+  id: string;
+  kind: SuggestionKind;
+  title: string;
+  detail: string;
+  action: "ask_fix" | "send_failure" | "handoff";
 }

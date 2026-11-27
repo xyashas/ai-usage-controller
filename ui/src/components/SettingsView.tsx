@@ -86,6 +86,8 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         <Toggle label="Run tests when an agent finishes" on={s.verify_done} set={(v) => update({ ...s, verify_done: v })} />
         <p className="text-[11px] leading-relaxed text-muted">Runs the project's tests in the task's folder (cargo, npm, pnpm, go, pytest, make, or the command in <code className="text-fg">.aiuc/verify</code>) and shows whether they pass.</p>
         <Toggle label="Paste and send tasks automatically" on={s.auto_send} set={(v) => update({ ...s, auto_send: v })} />
+        <Toggle label="Polish tasks before sending" on={s.polish_auto} set={(v) => update({ ...s, polish_auto: v })} />
+        <Toggle label="Suggest actions" on={s.suggest_chips} set={(v) => update({ ...s, suggest_chips: v })} />
         <p className="text-[11px] leading-relaxed text-muted">
           When a task or handoff opens in an app or the web, the widget pastes it and presses Enter once that window is in front. It never types into any other window.
           {navigator.userAgent.includes("Mac") ? " On a Mac, allow AI Usage Controller under System Settings → Privacy & Security → Accessibility." : ""}

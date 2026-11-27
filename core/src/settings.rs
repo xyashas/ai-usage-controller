@@ -83,6 +83,10 @@ pub struct Settings {
     pub verify_done: bool,
     /// Show the daily morning brief card at the top of Usage each day.
     pub show_daily_recap: bool,
+    /// Polish tasks automatically before sending.
+    pub polish_auto: bool,
+    /// Show proactive suggestion chips sliding down from the notch.
+    pub suggest_chips: bool,
 }
 
 impl Default for Settings {
@@ -109,6 +113,8 @@ impl Default for Settings {
             approvals: true,
             verify_done: true,
             show_daily_recap: true,
+            polish_auto: false,
+            suggest_chips: true,
         }
     }
 }

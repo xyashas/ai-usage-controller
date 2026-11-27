@@ -1,5 +1,7 @@
 mod agents;
 mod autosend;
+mod clipboard_watch;
+mod watch;
 mod claude_web;
 mod dispatch;
 mod hover;
@@ -840,6 +842,9 @@ pub fn run() {
             platform,
             dismiss_alert,
             dismiss_daily_recap,
+            watch::add_watch,
+            watch::list_watches,
+            watch::remove_watch,
             alert_action,
             accept_nudge,
             accept_audit,
@@ -926,6 +931,7 @@ pub fn run() {
             spawn_worker(app.handle().clone(), engine.clone(), last.clone());
             hover::spawn(app.handle().clone(), hit.clone());
             claude_web::spawn(app.handle().clone(), web.clone(), engine.clone());
+            clipboard_watch::spawn(app.handle().clone(), engine.clone());
             #[cfg(feature = "updater")]
             spawn_updater(app.handle().clone());
             Ok(())
