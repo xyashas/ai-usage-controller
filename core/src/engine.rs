@@ -168,6 +168,23 @@ impl Engine {
 /// The most recent Claude Code or Codex session from the last 24 hours, offered
     /// whatever the usage. Powers "Test handoff" in Check setup, so the flow can be
     /// tried without burning a plan limit to 90%.
+    /// Project folders of Claude Code and Codex sessions in the last two weeks,
+    /// most recent first. Used to suggest repositories for handoffs.
+    pub fn recent_projects(&self, now: DateTime<Utc>) -> Result<Vec<PathBuf>> {
+        let mut seen: Vec<(DateTime<Utc>, PathBuf)> = Vec::new();
+        for tool in [Tool::ClaudeCode, Tool::Codex] {
+            for e in self.store.events(Some(tool), now - Duration::days(14), now + Duration::seconds(1))? {
+                let Some(p) = e.project.as_deref().map(PathBuf::from).filter(|p| p.is_absolute()) else { continue };
+                match seen.iter_mut().find(|(_, q)| *q == p) {
+                    Some(entry) => entry.0 = entry.0.max(e.ts),
+                    None => seen.push((e.ts, p)),
+                }
+            }
+        }
+        seen.sort_by_key(|e| std::cmp::Reverse(e.0));
+        Ok(seen.into_iter().map(|(_, p)| p).collect())
+    }
+
     pub fn test_handoff_offers(&self, now: DateTime<Utc>) -> Result<Vec<crate::snapshot::HandoffOffer>> {
         let mut out = Vec::new();
         for tool in [Tool::ClaudeCode, Tool::Codex] {
@@ -176,7 +193,7 @@ impl Engine {
             }
             let recent = self.store.events(Some(tool), now - Duration::hours(24), now + Duration::seconds(1))?;
             if let Some(e) = recent.iter().rev().find(|e| e.ts <= now) {
-                let targets = Tool::ALL.into_iter().filter(|o| *o != tool && crate::handoff::cli(*o).is_some()).collect();
+                let targets = crate::handoff::targets(tool);
                 out.push(crate::snapshot::HandoffOffer { source: tool, session: e.session_id.clone(), targets });
             }
         }
@@ -679,7 +696,7 @@ impl Engine {
             if !near_limit && !red { continue; }
             if let Some(event) = recent_by_tool[&t.tool].iter().rev()
                 .find(|e| e.ts <= now && e.ts >= now - Duration::hours(2)) {
-                let targets = Tool::ALL.into_iter().filter(|other| *other != t.tool && crate::handoff::cli(*other).is_some()).collect();
+                let targets = crate::handoff::targets(t.tool);
                 snap.handoffs.push(crate::snapshot::HandoffOffer { source: t.tool, session: event.session_id.clone(), targets });
             }
         }

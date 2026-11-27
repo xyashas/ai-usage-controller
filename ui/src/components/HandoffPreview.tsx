@@ -1,45 +1,112 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { Tool } from "../types";
+import type { Dest, DestOption, HandoffPreviewData, Tool } from "../types";
+import { tint, toolName } from "../theme";
+import { ToolMark } from "./ToolMark";
+import { BackIcon, Check } from "./icons";
 
-export const toolName: Record<Tool, string> = { claude_code: "Claude Code", codex: "Codex", gemini: "Gemini" };
-export type Draft = { source: Tool; target: Tool; preview: Promise<{ id: number; prompt: string }> };
+export { toolName };
+export type Draft = { source?: Tool; target: Tool; preview: Promise<HandoffPreviewData> };
+
+const action: Record<Dest, (t: Tool, label: string) => string> = {
+  app: (_t, label) => `Open ${label}`,
+  terminal: () => "Open in terminal",
+  web: (t) => `Open ${toolName[t]} on the web`,
+};
+
+const hint: Record<Dest, string> = {
+  app: "Copies the handoff and opens the app. Paste it into a new session there.",
+  terminal: "Saves .aiuc-handoff.md in the project (hidden from git) and starts the CLI there, already reading it.",
+  web: "Copies the handoff and opens the web app. Cloud sessions see what's pushed to GitHub, so push your branch first.",
+};
 
 export function HandoffPreview({ draft, onBack }: { draft: Draft; onBack: () => void }) {
-  const [id, setId] = useState<number>();
+  const [data, setData] = useState<HandoffPreviewData>();
   const [prompt, setPrompt] = useState("");
+  const [dest, setDest] = useState<DestOption>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
   useEffect(() => {
     let current = true;
-    draft.preview.then(p => {
-      if (current) { setPrompt(p.prompt); setId(p.id); }
-    }, e => { if (current) setError(String(e)); });
+    draft.preview.then((p) => {
+      if (!current) return;
+      setData(p);
+      setPrompt(p.prompt);
+      setDest(p.destinations[0]);
+    }, (e) => { if (current) setError(String(e)); });
     return () => { current = false; };
   }, [draft]);
+
   const words = prompt.trim() ? prompt.trim().split(/\s+/u).length : 0;
+  const tooLong = words >= 1500 || new TextEncoder().encode(prompt).length > 100000;
+  const c = tint[draft.target];
+
   async function launch() {
-    if (id == null || busy) return;
+    if (!data || !dest || busy) return;
     setBusy(true);
     setError("");
-    try { await api.launchHandoff(id, prompt); onBack(); }
-    catch (e) { setError(String(e)); setBusy(false); }
+    try { setDone(await api.launchHandoff(data.id, prompt, dest.dest)); }
+    catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
   }
-  return <section className="flex flex-col gap-4 p-4">
-    <button disabled={busy} className="self-start text-xs text-muted" onClick={onBack}>Back</button>
-    <h2 className="text-[18px] font-semibold">Preview handoff</h2>
-    <p className="text-xs text-muted">{toolName[draft.source]} to {toolName[draft.target]}. Review what the next session will read.</p>
-    {id != null ? <>
-      <label className="flex flex-col gap-2 text-xs">Handoff prompt
-        <textarea className="h-56 resize-none rounded-lg bg-fg/5 p-2 text-[13px]" value={prompt} spellCheck={false}
-          autoCorrect="off" autoCapitalize="off" disabled={busy} onFocus={() => api.focus()} onChange={e => setPrompt(e.target.value)} />
-      </label>
-      <p className="text-xs text-muted">{words.toLocaleString()} / 1,499 words. Continuing saves .aiuc-handoff.md in the project and copies this text to your clipboard.</p>
-      <button disabled={busy || !words || words >= 1500 || new TextEncoder().encode(prompt).length > 100000}
-        className="rounded-full bg-fg py-2 text-sm font-semibold text-canvas" onClick={launch}>
-        {busy ? "Opening terminal..." : `Continue in ${toolName[draft.target]}`}
-      </button>
-    </> : !error && <p role="status" className="text-xs">Reading the local session...</p>}
-    {error && <p role="alert" className="text-xs text-bad">{error}</p>}
-  </section>;
+
+  if (done) {
+    return (
+      <section className="flex flex-col items-center gap-3 px-6 py-8 text-center fade-in">
+        <span className="scale-[1.6]"><Check ok /></span>
+        <h2 className="mt-2 text-[17px] font-semibold tracking-tight">Handed off to {toolName[draft.target]}</h2>
+        <p className="max-w-[340px] text-[12.5px] leading-relaxed text-muted">{done}</p>
+        <button className="btn btn-primary mt-2 min-w-[120px]" onClick={onBack}>Done</button>
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-3 p-3">
+      <header className="flex items-center gap-2 px-1">
+        <button disabled={busy} className="icon-btn" aria-label="Back" onClick={onBack}><BackIcon /></button>
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-1.5 text-[15px] font-semibold tracking-tight"><ToolMark tool={draft.target} />Continue in {toolName[draft.target]}</h2>
+          <p className="truncate text-[11.5px] text-muted">{draft.source ? `From ${toolName[draft.source]}` : "From the repo's handoff"}{data?.place ? ` · ${data.place}` : ""}</p>
+        </div>
+      </header>
+
+      {data ? (
+        <>
+          <div className="card !p-0" style={{ background: c.bg, color: c.ink }}>
+            <textarea
+              aria-label="Handoff prompt"
+              className="block h-[230px] w-full resize-none bg-transparent px-4 py-3.5 font-mono text-[11.5px] leading-relaxed outline-none"
+              value={prompt}
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
+              disabled={busy}
+              onFocus={() => api.focus()}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+            <p className={`tabular px-4 pb-2.5 text-right text-[10.5px] ${tooLong ? "font-semibold text-[#a3261b]" : "opacity-50"}`}>{words.toLocaleString()} / 1,499 words</p>
+          </div>
+
+          {data.destinations.length > 1 && (
+            <div className="flex items-center justify-between gap-2 px-1">
+              <span className="text-[12px] text-muted">Open in</span>
+              <div className="seg" role="group" aria-label="Open in">
+                {data.destinations.map((d) => (
+                  <button key={d.dest} aria-pressed={dest?.dest === d.dest} onClick={() => setDest(d)}>{d.label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {dest && <p className="px-1 text-[11.5px] leading-relaxed text-muted">{hint[dest.dest]}</p>}
+
+          <button disabled={busy || !words || tooLong || !dest} className="btn btn-primary w-full !py-2.5 text-[13px]" onClick={launch}>
+            {busy ? "Opening…" : dest ? action[dest.dest](draft.target, dest.label) : "Continue"}
+          </button>
+        </>
+      ) : !error && <p role="status" className="px-1 py-6 text-center text-[12px] text-muted">Reading the session…</p>}
+      {error && <p role="alert" className="px-1 text-[12px] text-bad">{error}</p>}
+    </section>
+  );
 }

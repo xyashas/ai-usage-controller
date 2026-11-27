@@ -10,6 +10,7 @@ use aiuc_core::{Engine, Snapshot};
 use chrono::{Duration as CDuration, Utc};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -28,8 +29,13 @@ static CLAUDE_CODE_LOGIN: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 
 struct PendingHandoff {
     id: u64,
-    cwd: std::path::PathBuf,
+    /// The project folder on this computer, if there is one.
+    cwd: Option<PathBuf>,
     target: Tool,
+}
+
+pub fn tool_name(t: Tool) -> &'static str {
+    match t { Tool::ClaudeCode => "Claude Code", Tool::Codex => "Codex", Tool::Gemini => "Gemini" }
 }
 
 struct AppState {
@@ -63,6 +69,18 @@ fn get_snapshot(state: State<AppState>) -> CmdResult<Snapshot> {
 struct Preview {
     id: u64,
     prompt: String,
+    /// Where the handoff can open, best first.
+    destinations: Vec<handoff::DestOption>,
+    /// The folder or repository it continues, for the preview's subtitle.
+    place: String,
+}
+
+fn new_preview(pending: &Mutex<Option<PendingHandoff>>, cwd: Option<PathBuf>, target: Tool, prompt: String, place: String) -> CmdResult<Preview> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let destinations = handoff::destinations(target, cwd.is_some());
+    *pending.lock().map_err(err)? = Some(PendingHandoff { id, cwd, target });
+    Ok(Preview { id, prompt, destinations, place })
 }
 
 #[tauri::command]
@@ -86,10 +104,8 @@ async fn preview_handoff(window: tauri::WebviewWindow, state: State<'_, AppState
             eng.roots(source)
         };
         let (cwd, prompt) = aiuc_core::handoff::prepare(&roots, source, &session).map_err(err)?;
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        *pending.lock().map_err(err)? = Some(PendingHandoff { id, cwd, target });
-        Ok(Preview { id, prompt })
+        let place = cwd.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        new_preview(&pending, Some(cwd), target, prompt, place)
     }).await.map_err(err)?
 }
 
@@ -99,17 +115,101 @@ fn test_handoff_offers(state: State<AppState>) -> CmdResult<Vec<aiuc_core::snaps
 }
 
 #[tauri::command]
-async fn launch_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>, id: u64, prompt: String) -> CmdResult<()> {
+async fn launch_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>, id: u64, prompt: String, dest: handoff::Dest) -> CmdResult<String> {
     if window.label() != "widget" { return Err("Open the widget to launch a handoff.".into()); }
     let pending = state.handoff.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut guard = pending.lock().map_err(err)?;
         let draft = guard.as_ref().filter(|d| d.id == id).ok_or("Preview this session again.")?;
-        handoff::launch(&draft.cwd, draft.target, &prompt)?;
+        let msg = handoff::launch(draft.cwd.as_deref(), draft.target, dest, &prompt)?;
         *guard = None;
-        Ok(())
+        Ok(msg)
     }).await.map_err(err)?
 }
+
+// ---------------- repo handoffs (cloud and local) ----------------
+
+use aiuc_core::repo_handoff as rh;
+
+/// Repositories to show: the ones the user added, then those of recent sessions.
+fn repo_candidates(engine: &Mutex<Engine>) -> CmdResult<Vec<PathBuf>> {
+    let eng = engine.lock().map_err(err)?;
+    let mut folders = eng.settings.repos.clone();
+    folders.extend(eng.recent_projects(Utc::now()).map_err(err)?);
+    drop(eng);
+    let mut roots = rh::roots(folders.iter().map(PathBuf::as_path));
+    roots.truncate(8);
+    Ok(roots)
+}
+
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> CmdResult<T> + Send + 'static) -> CmdResult<T> {
+    tauri::async_runtime::spawn_blocking(f).await.map_err(err)?
+}
+
+#[tauri::command]
+async fn list_repos(state: State<'_, AppState>, fetch: Option<bool>) -> CmdResult<Vec<rh::RepoStatus>> {
+    let engine = state.engine.clone();
+    blocking(move || {
+        let roots = repo_candidates(&engine)?;
+        if fetch.unwrap_or(false) {
+            // Handoffs pushed by cloud agents arrive with a fetch. In parallel,
+            // and failures (offline, no access) just leave the local view.
+            let handles: Vec<_> = roots.iter().filter(|r| rh::is_set_up(r)).cloned()
+                .map(|r| std::thread::spawn(move || { let _ = rh::fetch(&r); })).collect();
+            for h in handles { let _ = h.join(); }
+        }
+        Ok(roots.iter().map(|r| rh::status(r)).collect())
+    }).await
+}
+
+#[tauri::command]
+async fn setup_repo(path: PathBuf, commit: bool) -> CmdResult<rh::SetupResult> {
+    blocking(move || rh::setup(&path, commit).map_err(err)).await
+}
+
+#[tauri::command]
+async fn add_repo(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Option<PathBuf>> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().set_title("Choose a project folder").pick_folder(move |f| { let _ = tx.send(f); });
+    let engine = state.engine.clone();
+    blocking(move || {
+        let Some(Some(folder)) = rx.recv().ok() else { return Ok(None) };
+        let folder = folder.into_path().map_err(err)?;
+        let root = rh::repo_root(&folder).map_err(err)?;
+        let mut eng = engine.lock().map_err(err)?;
+        eng.settings.repos.retain(|r| r != &root);
+        eng.settings.repos.insert(0, root.clone());
+        eng.save_settings().map_err(err)?;
+        Ok(Some(root))
+    }).await
+}
+
+#[tauri::command]
+fn forget_repo(state: State<AppState>, path: PathBuf) -> CmdResult<()> {
+    let mut eng = state.engine.lock().map_err(err)?;
+    eng.settings.repos.retain(|r| r != &path);
+    eng.save_settings().map_err(err)
+}
+
+#[tauri::command]
+async fn preview_repo_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>, path: PathBuf, target: Tool) -> CmdResult<Preview> {
+    if window.label() != "widget" { return Err("Open the widget to preview a handoff.".into()); }
+    let engine = state.engine.clone();
+    let pending = state.handoff.clone();
+    blocking(move || {
+        // Only repositories the widget lists, so a page can't point this at any folder.
+        let root = rh::repo_root(&path).map_err(err)?;
+        if !repo_candidates(&engine)?.contains(&root) { return Err("That repository isn't in your list.".into()); }
+        let status = rh::status(&root);
+        let latest = status.latest.as_ref().ok_or("This repo has no handoff yet. It appears after the first AI session that runs there.")?;
+        let cloud = !handoff::destinations(target, true).iter().any(|d| d.dest != handoff::Dest::Web);
+        let prompt = rh::continue_prompt(&status.name, latest, cloud);
+        let place = if latest.branch.is_empty() { status.name.clone() } else { format!("{} · {}", status.name, latest.branch) };
+        new_preview(&pending, Some(root), target, prompt, place)
+    }).await
+}
+
 
 #[tauri::command]
 fn get_settings(state: State<AppState>) -> CmdResult<Settings> {
@@ -133,6 +233,8 @@ fn save_settings(app: AppHandle, state: State<AppState>, mut settings: Settings)
         let old = eng.settings.hotkey.clone();
         // Sign-in can complete while onboarding or Settings is still open.
         settings.claude_web = eng.settings.claude_web;
+        // Repos are managed from the Handoff tab, not the settings form.
+        settings.repos = eng.settings.repos.clone();
         eng.settings = settings.clone();
         eng.save_settings().map_err(err)?;
         old
@@ -522,6 +624,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -548,6 +651,11 @@ pub fn run() {
             preview_handoff,
             test_handoff_offers,
             launch_handoff,
+            list_repos,
+            setup_repo,
+            add_repo,
+            forget_repo,
+            preview_repo_handoff,
             get_settings,
             save_settings,
             get_plans,

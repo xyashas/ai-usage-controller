@@ -104,7 +104,7 @@ macOS universal + Windows installers uploaded as artifacts
 - One-click Stop (SIGINT) is unix-only and off by default.
 
 ### Widget window (`app/src-tauri/src/window.rs`, `hover.rs`, `ui/src/App.tsx`)
-- **One fixed-size transparent window (420×600) pinned top-centre. It never
+- **One fixed-size transparent window (580×700) pinned top-centre. It never
   resizes.** The pill and panel are one shared "surface" that morphs with CSS
   transitions. (Earlier versions resized the window and raced with a
   ResizeObserver, leaving a huge oval on screen — don't go back to that.)
@@ -113,28 +113,33 @@ macOS universal + Windows installers uploaded as artifacts
   `hover.rs` polls the cursor every 40 ms, toggles `set_ignore_cursor_events`,
   and emits `hover` true/false. That event is the single source of truth for
   open-on-hover (140 ms dwell) / close-on-leave (260 ms grace).
-- Views other than the main panel (settings, onboarding, setup, paywall, audit)
+- Views other than the main panel (handoffs, settings, onboarding, setup, paywall, audit)
   are "sticky": they don't close on leave, only on click-away (blur) or Esc.
   Blur is ignored while the cursor is over the shape.
-- Content height is measured from a stable wrapper (`innerRef`) and capped at 560.
+- The panel is 520 wide. Content height is measured from a stable wrapper (`innerRef`) and capped at 640.
 - Typing needs keyboard focus: inputs call `api.focus()` on focus.
 - macOS: window level 25 (above menu bar), all Spaces; notch height from
   `NSScreen.safeAreaInsets`.
 
 ### Widget appearance and usage history
-- The native 420×600 window stays fixed. CSS animates the surface to its measured
-  view height. The OS selects the panel palette. A collapsed Mac notch stays black
-  in both themes and uses a small usage ring. Other pills use a horizontal meter.
+- Look: black panel (matches the notch), always dark. Inspired by NotchOwl: each
+  tool is a soft tinted tile with dark ink (`ui/src/theme.ts`: Claude clay,
+  Codex sky, Gemini lavender; alerts rose/amber). Shared classes live in
+  `styles.css` (`tile`, `card`, `btn`, `btn-primary`, `btn-ink`, `seg`, `eyebrow`,
+  `field`, `icon-btn`). Use them instead of ad-hoc Tailwind so views stay consistent.
+- Top bar (`TopBar.tsx`): name, a Usage / Handoff switch, Check setup, Settings.
+- **The 5-hour limit is shown first** (big number) for every tool, the pill and
+  the alert; weekly and others are smaller rows under it (`primaryWindow` in
+  `Expanded.tsx`). The pill adds a dot when another limit is worse.
 - The pill counts to its next percentage and only pulses for red alerts. Reduced
   motion disables transitions, pulses and counting. Hidden layers are inert,
   Tab reaches the visible controls, Enter activates them and Esc returns to the pill.
-- The main meter's sparkline uses the last 24 hours of stored samples for its
-  binding window after tier gating. Five-minute buckets retain window changes.
-  Dashed ticks mark elapsed reset times from the samples. Long gaps are left open.
-  Tools without gauge history omit the chart.
-- Preview a view directly with `?view=panel|settings|setup|paywall|audit|onboarding`.
-  Use `?platform=macos&notch=32` for a notched Mac, and `?scenario=empty|learning`
-  to check the first-use states.
+- The Claude tile shows a 24-hour sparkline of the live gauge only when it is the
+  only tool (full width). Tools without gauge history omit it.
+- Preview a view directly with `?view=panel|handoffs|settings|setup|paywall|audit|onboarding`.
+  Use `?platform=macos&notch=32` for a notched Mac, `?scenario=critical` (local
+  handoff in the alert), `?scenario=cloud` (no local session: the alert offers the
+  newest repo handoff), and `?scenario=empty|learning|unconnected` for first use.
 
 ### Desktop lifecycle
 - Launch at login defaults on once onboarding is complete, including existing
@@ -211,6 +216,34 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    Claude Code/Codex session from the last 24 h whatever the usage; the preview
    command accepts `test: true` and validates against that list instead of the
    snapshot. Same preview → confirm → launch path as the real handoff.
+1b. **Destinations: app, terminal or web** (`app/src-tauri/src/handoff.rs`).
+   Claude Code opens the Claude desktop app (its Code tab), Codex the Codex app,
+   when installed; otherwise the web (claude.ai/code, chatgpt.com/codex). Gemini
+   opens its CLI in a terminal, else gemini.google.com. The preview has an
+   "Open in" switch (app / Terminal / Web) listing what exists, best first. The
+   prompt always goes to the clipboard; app and web need a paste (no deep link
+   takes a prompt). App detection: macOS `/Applications/{Claude,Codex}.app`
+   (and ~/Applications), Windows exe under %LOCALAPPDATA% or a registered
+   `claude://` / `codex://` scheme (Store installs). Owner to verify on Windows.
+1c. **Repo-based handoff for cloud and local** (`core/src/repo_handoff.rs`,
+   `core/data/aiuc-hook.mjs`, Handoff tab `ui/src/components/HandoffHub.tsx`).
+   The repo is the one place every agent shares, so the handoff lives there:
+   **Set up** (per repo, optional commit, never pushes) adds `.aiuc/hook.mjs`, a
+   marked rule block in `AGENTS.md`/`CLAUDE.md` (and `GEMINI.md` if present) and
+   a Claude Code `Stop` hook in `.claude/settings.json`. After every turn, locally
+   and in Claude Code cloud, the hook rewrites the auto section of
+   `.aiuc/handoff.md` from the transcript (goal, requests, files, to-dos, last
+   reply, errors; secrets redacted; no network) and keeps the agent-written
+   **Status** above it. In the cloud it `git add`s the file so it ships with the
+   next commit. Codex/Gemini (cloud or local) follow the rule to read it first and
+   keep Status current. The widget lists repos from recent session folders plus
+   ones added with **+** (settings `repos`), fetches origin (25 s timeout, no
+   prompts) to see handoffs pushed by cloud agents, finds the newest handoff on
+   any branch (`repo_handoff::latest`), and previews "Continue <repo> on branch X
+   in <tool>". When a limit alert has no local session (you were in the cloud),
+   the alert offers the newest repo handoff from the last 12 h.
+   Next: Codex limits for cloud-only users (ChatGPT account connection,
+   feasibility unverified); cloud token counts for the meter.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).

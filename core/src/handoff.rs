@@ -87,6 +87,13 @@ pub fn cli(tool: Tool) -> Option<PathBuf> {
     executable(if tool == Tool::ClaudeCode { "claude" } else { tool.as_str() })
 }
 
+/// Where a session can be handed to. Claude Code and Codex are always reachable
+/// (their desktop app, or the web when it isn't installed). Gemini has no app
+/// for coding, so it needs the Gemini CLI.
+pub fn targets(source: Tool) -> Vec<Tool> {
+    Tool::ALL.into_iter().filter(|t| *t != source && (*t != Tool::Gemini || cli(Tool::Gemini).is_some())).collect()
+}
+
 #[derive(Default)]
 struct Summary {
     cwd: Option<PathBuf>,

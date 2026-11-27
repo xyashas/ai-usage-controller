@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Alert, Detected, Diagnostics, HandoffOffer, Plan, Rect, Settings, Snapshot, Tool } from "./types";
+import type { Alert, Dest, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -13,9 +13,14 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const api = {
-  previewHandoff: (source: Tool, session: string, target: Tool, test = false) => call<{ id: number; prompt: string }>("preview_handoff", { source, session, target, test }),
+  previewHandoff: (source: Tool, session: string, target: Tool, test = false) => call<HandoffPreviewData>("preview_handoff", { source, session, target, test }),
+  previewRepoHandoff: (path: string, target: Tool) => call<HandoffPreviewData>("preview_repo_handoff", { path, target }),
   testHandoffOffers: () => call<HandoffOffer[]>("test_handoff_offers"),
-  launchHandoff: (id: number, prompt: string) => call<void>("launch_handoff", { id, prompt }),
+  launchHandoff: (id: number, prompt: string, dest: Dest) => call<string>("launch_handoff", { id, prompt, dest }),
+  listRepos: (fetch: boolean) => call<RepoStatus[]>("list_repos", { fetch }),
+  setupRepo: (path: string, commit: boolean) => call<SetupResult>("setup_repo", { path, commit }),
+  addRepo: () => call<string | null>("add_repo"),
+  forgetRepo: (path: string) => call<void>("forget_repo", { path }),
   snapshot: () => call<Snapshot>("get_snapshot"),
   settings: () => call<Settings>("get_settings"),
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
@@ -67,7 +72,7 @@ export async function onHover(cb: (inside: boolean) => void): Promise<() => void
 export async function onOpenView(cb: (v: string) => void): Promise<() => void> {
   if (!inTauri) {
     const preview = new URLSearchParams(location.search).get("view");
-    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding"].includes(preview)) cb(preview);
+    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding", "handoffs"].includes(preview)) cb(preview);
     return () => {};
   }
   const { listen } = await import("@tauri-apps/api/event");
@@ -98,11 +103,16 @@ let mockSettings: Settings = {
   api_base: "https://api.aiusage.dev",
 };
 const dismissed = new Set<string>();
+const mockRepos: RepoStatus[] = mockScenario === "empty" ? [] : [
+  { root: "/Users/you/dev/acme-web", name: "acme/web", set_up: true, current_branch: "main", github: "https://github.com/acme/web",
+    latest: { branch: "claude/fix-login", updated_at: Date.now() / 1000 - 760, origin: "commit", content: "# Handoff" } },
+  { root: "/Users/you/dev/acme-api", name: "acme/api", set_up: false, current_branch: "main", github: "https://github.com/acme/api", latest: null },
+];
 
 function mockSnapshot(): Snapshot {
   const stamp = Date.now();
   const t = stamp / 1000;
-  const claudeLeft = mockScenario === "low" ? 14 : mockScenario === "critical" ? 4 : 38 - ((t / 20) % 6);
+  const claudeLeft = mockScenario === "low" ? 14 : mockScenario === "critical" || mockScenario === "cloud" ? 4 : 38 - ((t / 20) % 6);
   const paid = mockTier !== "free";
   const tool = (tool: Tool, label: string, left: number, extra: Partial<Snapshot["tools"][0]> = {}): Snapshot["tools"][0] => ({
     tool, label, detected: true, enabled: true, plan_id: null, plan_name: null,
@@ -186,7 +196,16 @@ const mockPlans: Record<Tool, Plan[]> = {
 function mock(cmd: string, args?: Record<string, unknown>): unknown {
   switch (cmd) {
     case "test_handoff_offers": return [{ source: "claude_code", session: "s", targets: ["codex", "gemini"] }];
-    case "preview_handoff": return { id: 1, prompt: "# Session handoff\n\n## Original goal\nFix checkout.\n\n## TODO\n- [ ] Run checkout tests." };
+    case "preview_handoff":
+    case "preview_repo_handoff": return {
+      id: 1, place: cmd === "preview_handoff" ? "acme-api" : "acme/web · claude/fix-login",
+      prompt: "# Session handoff\n\n## Original goal\nFix the checkout flow so coupons apply before tax.\n\n## Files created or edited\n- src/checkout/total.ts\n- src/checkout/total.test.ts\n\n## TODO\n- [ ] Run the checkout tests\n- [ ] Update the changelog",
+      destinations: (args!.target as Tool) === "gemini" ? [{ dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }] : [{ dest: "app", label: (args!.target as Tool) === "codex" ? "Codex app" : "Claude app" }, { dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }],
+    };
+    case "launch_handoff": return args!.dest === "terminal" ? "Codex is starting in a terminal." : "Prompt copied. Paste it into Codex in the Codex app.";
+    case "list_repos": return mockRepos;
+    case "setup_repo": { const r = mockRepos.find((x) => x.root === args!.path); if (r) r.set_up = true; return { root: args!.path, changed: [".aiuc/hook.mjs", "AGENTS.md", "CLAUDE.md", ".claude/settings.json"], committed: !!args!.commit }; }
+    case "add_repo": return null;
     case "get_snapshot": return mockSnapshot();
     case "get_settings": return structuredClone(mockSettings);
     case "save_settings": mockSettings = args!.settings as Settings; return null;

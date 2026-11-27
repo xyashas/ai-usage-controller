@@ -21,6 +21,7 @@ pub mod model;
 pub mod parsers;
 pub mod paths;
 pub mod plans;
+pub mod repo_handoff;
 pub mod pricing;
 pub mod runaway;
 pub mod scanner;

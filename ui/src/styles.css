@@ -1,76 +1,92 @@
 @import "tailwindcss";
 
 @theme {
-  --color-fg: #fafafa;
-  --color-muted: #b8bac6;
-  --color-canvas: #08090b;
+  --color-fg: #f5f5f7;
+  --color-muted: #a1a1aa;
+  --color-canvas: #000000;
   --color-ink: #0b0b0f;
-  --color-panel: #141419;
-  --color-line: #26262e;
-  --color-mute: #8b8b98;
-  --color-accent: #8b8bff;
-  --color-ok: #34d399;
+  --color-panel: #141416;
+  --color-line: #232326;
+  --color-mute: #8b8b93;
+  --color-accent: #a5b4fc;
+  --color-ok: #4ade80;
   --color-warn: #fbbf24;
   --color-bad: #f87171;
-  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 @layer base {
   html, body, #root { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-  body { font-family: var(--font-sans); color: #ececf1; -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
-  /* The browser preview (npm run dev) gets a backdrop so the widget is visible. */
-  body.preview { background: linear-gradient(#3a3a46, #24242c); }
+  body { font-family: var(--font-sans); color: var(--color-fg); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; letter-spacing: -0.005em; }
+  /* The browser preview (npm run dev) gets a wallpaper so the widget is visible. */
+  body.preview { background: radial-gradient(120% 90% at 30% 0%, #5b6f8f 0%, #2b3346 45%, #161a24 100%); }
   button { cursor: pointer; }
-  input[type="checkbox"] { accent-color: #8b8bff; }
-  select option { background: var(--color-canvas); color: var(--color-fg); }
+  input[type="checkbox"] { accent-color: #f5f5f7; }
+  select option { background: #141416; color: var(--color-fg); }
 }
 @utility tabular { font-variant-numeric: tabular-nums; }
 
+/* Building blocks, so every view feels the same. */
+@layer components {
+  /* A dark tile on the black panel. */
+  .tile { background: #141416; border-radius: 20px; padding: 14px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05); }
+  /* A tinted tile (background and ink set inline). */
+  .card { border-radius: 22px; padding: 14px; position: relative; overflow: hidden; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 999px; padding: 7px 14px; font-size: 12.5px; font-weight: 600; background: rgba(255, 255, 255, 0.09); color: var(--color-fg); transition: background 150ms ease, transform 120ms ease; }
+  .btn:hover { background: rgba(255, 255, 255, 0.14); }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: #f5f5f7; color: #000; }
+  .btn-primary:hover { background: #ffffff; }
+  /* Black pill on a tinted tile, like a system button on a widget. */
+  .btn-ink { background: rgba(0, 0, 0, 0.86); color: #fff; }
+  .btn-ink:hover { background: #000; }
+  .btn-ghost { background: transparent; color: var(--color-muted); padding: 6px 10px; }
+  .btn-ghost:hover { background: rgba(255, 255, 255, 0.07); color: var(--color-fg); }
+  .btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 999px; color: var(--color-muted); transition: background 150ms ease, color 150ms ease; }
+  .icon-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--color-fg); }
+  .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); }
+  .seg > button { border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 500; color: var(--color-muted); transition: background 180ms ease, color 180ms ease; }
+  .seg > button[aria-pressed="true"] { background: rgba(255, 255, 255, 0.16); color: var(--color-fg); }
+  .eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-mute); }
+  .field { width: 100%; border-radius: 12px; background: rgba(255, 255, 255, 0.06); padding: 8px 10px; font-size: 12.5px; color: var(--color-fg); outline: none; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+  .field:focus { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
+}
+
 @keyframes pulse-red { 0%, 100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.0); } 50% { box-shadow: 0 0 14px 2px rgba(248,113,113,0.32); } }
 .pulse-red { animation: pulse-red 2.8s ease-in-out infinite; }
+@keyframes dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.live-dot { animation: dot 2.4s ease-in-out infinite; }
+
 /* The widget: one black surface that morphs between the pill and the panel. */
 .surface {
-  background: var(--color-canvas);
+  background: #000;
   color: var(--color-fg);
   color-scheme: dark;
   transition:
     opacity 220ms ease,
-    width 380ms cubic-bezier(0.32, 0.72, 0, 1),
-    height 380ms cubic-bezier(0.32, 0.72, 0, 1),
-    border-radius 380ms cubic-bezier(0.32, 0.72, 0, 1),
+    width 420ms cubic-bezier(0.32, 0.72, 0, 1),
+    height 420ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 420ms cubic-bezier(0.32, 0.72, 0, 1),
     box-shadow 300ms ease;
   will-change: width, height;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
-.surface.is-open { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -12px rgba(0, 0, 0, 0.55); }
+.surface.is-open { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 24px 60px -16px rgba(0, 0, 0, 0.7); }
 .pill-layer { transition: opacity 140ms ease; }
 .surface.is-open .pill-layer { pointer-events: none; }
 .panel-layer { transition: opacity 120ms ease; scrollbar-width: none; }
-.surface.is-open .panel-layer { transition: opacity 220ms ease 90ms; }
+.surface.is-open .panel-layer { transition: opacity 240ms ease 110ms; }
 .panel-layer::-webkit-scrollbar { display: none; }
-.fade-in { animation: fade-in 160ms ease-out; }
-@keyframes fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .surface, .pill-layer, .panel-layer { transition: none !important; } }
+/* Content slides in with the panel, so opening feels like one motion. */
+.panel-layer > div { transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1); transform: translateY(-6px) scale(0.985); transform-origin: top center; }
+.surface.is-open .panel-layer > div { transform: none; }
+.fade-in { animation: fade-in 220ms cubic-bezier(0.32, 0.72, 0, 1); }
+@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
-@media (prefers-color-scheme: light) {
-  .surface:not(.notch-pill) {
-    color-scheme: light;
-    --color-canvas: #fafafa;
-    --color-fg: #17181d;
-    --color-muted: #484954;
-    --color-mute: #484954;
-    --color-accent: #443293;
-    --color-ok: #115c42;
-    --color-bad: #9c2637;
-    --color-warn: #704500;
-  }
-  body.preview { background: linear-gradient(#dadbe2, #eff0f4); }
-}
-.surface.notch-pill { background: #000; }
-.surface :focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.surface :focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: 2px; }
 .surface .panel-layer:focus { outline: none; }
-.surface :disabled { opacity: 1; cursor: default; }
-.surface input::placeholder { color: var(--color-muted); opacity: 1; }
+.surface input::placeholder, .surface textarea::placeholder { color: var(--color-mute); opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .surface, .surface * { transition: none !important; animation: none !important; }
 }

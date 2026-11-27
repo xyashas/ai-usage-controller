@@ -20,25 +20,35 @@ A Mac and Windows widget that shows how much AI runway you have left, warns you 
 └──────────────────────────────────────────────┘
 ```
 
-## Continue a session in another CLI
+## Hand work to another AI (local and cloud)
 
-At 90% usage of a five-hour or weekly limit, the panel offers installed destinations
-for your most recent Claude Code or Codex session. The action also appears on a red
-low-limit alert and stays available for two hours after the last session activity.
+When a limit gets close, carry the work to another tool with its context:
+the goal, latest requests, changed files, errors and what's left.
 
-Choose **Continue in Codex**, **Continue in Claude Code**, or **Continue in Gemini**
-to preview and edit a summary of the goal, latest requests, edits, errors, progress,
-and TODOs. Confirming saves the edited prompt as `.aiuc-handoff.md` in the session's
-project folder, hides it from git through `.git/info/exclude` (your `.gitignore` is
-never edited), and copies it to the clipboard.
-The widget opens the chosen CLI in that folder with an instruction to read the file.
-Windows uses Windows Terminal when available and PowerShell as a fallback. macOS
-uses Terminal.app. The widget finds the CLIs on PATH and in the usual npm, Homebrew,
-nvm and Volta folders, so installs made from a terminal are found even when the
-widget was opened from the Dock or Start menu.
+**Where it opens.** Claude Code opens in the Claude desktop app (Code tab), and Codex
+in the Codex app, if installed. Otherwise they open on the web (claude.ai/code,
+chatgpt.com/codex). Gemini opens its CLI in a terminal. The preview's **Open in**
+switch also offers the terminal (for installed CLIs) and the web. The prompt is
+always copied to the clipboard; the terminal option also saves it as
+`.aiuc-handoff.md` (hidden from git through `.git/info/exclude`) and starts the CLI
+already reading it.
 
-The widget prepares the handoff locally. It sends no transcript or prompt to its API.
-Once started, the destination CLI uses its own account and network settings.
+**Local sessions.** At 90% of a 5-hour or weekly limit, or on a red alert, the panel
+offers your latest Claude Code or Codex session. The **Handoff** tab offers it any time.
+
+**Cloud sessions (and local ones, too).** The repo is the one place every agent shares,
+so the handoff lives there. In the Handoff tab, **Set up** a repo once. This adds
+`.aiuc/hook.mjs`, a short rule in `AGENTS.md` and `CLAUDE.md`, and a Claude Code hook.
+It can commit those changes; it never pushes.
+After every Claude Code turn, locally and in Claude Code on the web, the hook rewrites
+`.aiuc/handoff.md`. Codex and Gemini read it first and keep its Status current.
+The file travels with the branch.
+The widget fetches your repos, finds the newest handoff on any branch, and offers
+**Continue in Codex / Claude Code / Gemini**. A limit alert does the same when you
+were working in the cloud.
+
+The widget prepares handoffs locally and sends nothing to its API. The hook never uses
+the network and redacts things that look like keys before writing.
 
 ## What's in v1
 

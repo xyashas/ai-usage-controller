@@ -10,9 +10,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::{LogicalPosition, LogicalSize, Manager, Runtime, WebviewWindow};
 
-/// The window's fixed size. The panel is at most 380×560; the extra leaves room
+/// The window's fixed size. The panel is at most 520×640; the extra leaves room
 /// for its shadow.
-pub const WINDOW: (f64, f64) = (420.0, 600.0);
+pub const WINDOW: (f64, f64) = (580.0, 700.0);
 
 #[derive(Clone, Serialize)]
 pub struct Layout {

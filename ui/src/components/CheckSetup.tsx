@@ -27,7 +27,7 @@ function ToolCard({ t, d }: { t: ToolDiagnostics; d: Diagnostics }) {
   const ok = t.tool === "claude_code" ? gauge && !t.live_error : logs || t.requests_total > 0;
   const cmp = COMPARE[t.tool];
   return (
-    <div className="space-y-2 rounded-2xl bg-fg/[0.04] p-4 ring-1 ring-fg/[0.06]">
+    <div className="space-y-2 tile">
       <div className="flex items-center gap-2">
         <Check ok={ok ? true : logs || gauge ? false : null} />
         <span className="flex items-center gap-2 text-[13px] font-medium"><ToolMark tool={t.tool} />{t.label}</span>
@@ -66,7 +66,7 @@ function ToolCard({ t, d }: { t: ToolDiagnostics; d: Diagnostics }) {
         <li>
           Compare with: <span className="text-fg">{cmp.where}</span>
           {cmp.url && (
-            <button className="ml-1 text-accent hover:underline" onClick={() => api.openUrl(cmp.url!)}>
+            <button className="ml-1 text-fg underline-offset-2 hover:underline" onClick={() => api.openUrl(cmp.url!)}>
               open
             </button>
           )}
@@ -116,15 +116,15 @@ export function CheckSetup({ onBack, onTestHandoff }: { onBack: () => void; onTe
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-3 p-3">
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-1 text-[12px] text-muted hover:text-fg">
+        <button onClick={onBack} className="btn btn-ghost !pl-1.5">
           <BackIcon /> Back
         </button>
         <span className="text-[11px] text-muted">v{d?.app_version}</span>
       </div>
       <div>
-        <h2 className="text-[16px] font-semibold tracking-tight">Check setup</h2>
+        <h2 className="text-[17px] font-semibold tracking-tight">Check setup</h2>
         <p className="mt-0.5 text-[12px] leading-relaxed text-muted">What the widget can see on this computer. Use an AI tool for a minute, then compare the numbers with the tool's own usage screen.</p>
       </div>
       {!d ? (
@@ -134,10 +134,10 @@ export function CheckSetup({ onBack, onTestHandoff }: { onBack: () => void; onTe
       )}
       <TestHandoff offers={offers} onTest={onTestHandoff} />
       <div className="flex gap-2">
-        <button onClick={refresh} disabled={busy} className="flex-1 rounded-full bg-fg/10 py-2 text-[12.5px] font-medium hover:bg-fg/15 disabled:opacity-50">
+        <button onClick={refresh} disabled={busy} className="btn flex-1">
           {busy ? "Refreshing…" : "Refresh now"}
         </button>
-        <button onClick={copy} className="flex-1 rounded-full bg-fg/[0.05] py-2 text-[12.5px] text-muted hover:bg-fg/10">
+        <button onClick={copy} className="btn btn-ghost flex-1">
           {copied ? "Copied ✓" : "Copy details"}
         </button>
       </div>
@@ -151,7 +151,7 @@ function TestHandoff({ offers, onTest }: { offers: HandoffOffer[] | null; onTest
   if (offers == null) return null;
   const usable = offers.filter((o) => o.targets.length > 0);
   return (
-    <div className="space-y-2 rounded-2xl bg-fg/[0.04] p-3.5 ring-1 ring-fg/[0.06]">
+    <div className="space-y-2 tile">
       <p className="text-[13px] font-medium">Test the handoff</p>
       {usable.length ? (
         <>
@@ -161,7 +161,7 @@ function TestHandoff({ offers, onTest }: { offers: HandoffOffer[] | null; onTest
           {usable.map((o) => (
             <div key={o.source} className="flex flex-wrap gap-2">
               {o.targets.map((target) => (
-                <button key={target} onClick={() => onTest(o, target)} className="grow rounded-full bg-fg/10 px-3 py-1.5 text-[12px] font-medium hover:bg-fg/15">
+                <button key={target} onClick={() => onTest(o, target)} className="btn grow !py-1.5 text-[12px]">
                   {toolName[o.source]} → {toolName[target]}
                 </button>
               ))}

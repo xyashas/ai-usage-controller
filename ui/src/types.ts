@@ -122,3 +122,10 @@ export interface Diagnostics {
   tools: ToolDiagnostics[];
 }
 export interface Rect { x: number; y: number; w: number; h: number }
+
+export type Dest = "app" | "terminal" | "web";
+export interface DestOption { dest: Dest; label: string }
+export interface HandoffPreviewData { id: number; prompt: string; destinations: DestOption[]; place: string }
+export interface RepoLatest { branch: string; updated_at: number; origin: "commit" | "working tree"; content: string }
+export interface RepoStatus { root: string; name: string; set_up: boolean; current_branch: string; github: string | null; latest: RepoLatest | null }
+export interface SetupResult { root: string; changed: string[]; committed: boolean }

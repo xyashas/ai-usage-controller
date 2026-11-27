@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { HandoffPreview, type Draft } from "./components/HandoffPreview";
-import type { HandoffOffer, Tool, Snapshot } from "./types";
+import type { HandoffOffer, RepoStatus, Tool, Snapshot } from "./types";
+import { HandoffHub } from "./components/HandoffHub";
 import { api, inTauri, onHover, onOpenView, onSnapshot, onToggle } from "./api";
 import { Collapsed } from "./components/Collapsed";
 import { Expanded } from "./components/Expanded";
@@ -10,14 +11,14 @@ import { SettingsView } from "./components/SettingsView";
 import { Onboarding } from "./components/Onboarding";
 import { CheckSetup } from "./components/CheckSetup";
 
-export type View = "panel" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
+export type View = "panel" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
 type Platform = "macos" | "windows" | "linux";
 
-const PANEL_W = 360;
-const MAX_H = 560;
+const PANEL_W = 520;
+const MAX_H = 640;
 const OPEN_DELAY = 140; // hover this long before the panel opens (stops drive-by opens)
 const CLOSE_DELAY = 260; // grace period after the cursor leaves
-const ANIM_MS = 380;
+const ANIM_MS = 420;
 
 function pillSize(platform: Platform, notch: number) {
   if (platform === "macos" && notch > 0) return { w: 236, h: notch + 22, top: 0 };
@@ -38,6 +39,7 @@ export default function App() {
   const openRef = useRef(false);
   const hoverRef = useRef(false); // cursor is over the widget's shape
   const viewRef = useRef<View>("panel");
+  const backTo = useRef<View>("panel"); // where a handoff preview returns to
   const hoverTimer = useRef<number | undefined>(undefined);
   const unmountTimer = useRef<number | undefined>(undefined);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -182,7 +184,7 @@ export default function App() {
   const pill = pillSize(platform, notch);
   const mac = platform === "macos";
   const height = open ? contentH : pill.h;
-  const radius = open ? (mac ? "0 0 28px 28px" : "24px") : mac ? `0 0 ${Math.min(16, pill.h / 2)}px ${Math.min(16, pill.h / 2)}px` : `${pill.h / 2}px`;
+  const radius = open ? (mac ? "0 0 30px 30px" : "28px") : mac ? `0 0 ${Math.min(16, pill.h / 2)}px ${Math.min(16, pill.h / 2)}px` : `${pill.h / 2}px`;
   const alert = snap.alerts[0];
 
   const goto = (v: View) => {
@@ -191,8 +193,15 @@ export default function App() {
   };
 
   function preview(offer: HandoffOffer, target: Tool, test = false) {
+    backTo.current = viewRef.current;
     const request = api.previewHandoff(offer.source, offer.session, target, test);
     setDraft({ source: offer.source, target, preview: request });
+    goto("handoff");
+  }
+
+  function previewRepo(repo: RepoStatus, target: Tool) {
+    backTo.current = viewRef.current;
+    setDraft({ target, preview: api.previewRepoHandoff(repo.root, target) });
     goto("handoff");
   }
 
@@ -222,7 +231,9 @@ export default function App() {
           >
             <div ref={innerRef} style={{ paddingTop: mac ? notch : 0 }}>
             {view === "handoff" && draft ? (
-              <HandoffPreview draft={draft} onBack={() => { setDraft(null); setView("panel"); }} />
+              <HandoffPreview draft={draft} onBack={() => { setDraft(null); setView(backTo.current === "handoff" ? "panel" : backTo.current); }} />
+            ) : view === "handoffs" ? (
+              <HandoffHub onView={goto} onHandoff={preview} onRepoHandoff={previewRepo} />
             ) : view === "onboarding" ? (
               <Onboarding
                 onDone={async () => {
@@ -239,7 +250,7 @@ export default function App() {
             ) : view === "setup" ? (
               <CheckSetup onBack={() => setView("panel")} onTestHandoff={(offer, target) => preview(offer, target, true)} />
             ) : (
-              <Expanded onHandoff={preview} snap={snap} onView={goto} refresh={refresh} />
+              <Expanded onHandoff={preview} onRepoHandoff={previewRepo} snap={snap} onView={goto} refresh={refresh} />
             )}
             </div>
           </div>

@@ -68,6 +68,9 @@ pub struct Settings {
     /// Signed in to claude.ai inside the app, so the plan gauge works without Claude Code.
     pub claude_web: bool,
     pub api_base: String,
+    /// Repositories the user added for handoffs, besides the ones found from
+    /// recent sessions. Local only.
+    pub repos: Vec<PathBuf>,
 }
 
 impl Default for Settings {
@@ -88,6 +91,7 @@ impl Default for Settings {
             live_gauges: true,
             claude_web: false,
             api_base: "https://api.aiusage.dev".into(),
+            repos: vec![],
         }
     }
 }
