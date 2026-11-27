@@ -752,6 +752,7 @@ impl Engine {
                 handoffs_count: 0,
                 total_limit_hits: 0,
             },
+            suggestions: vec![],
         };
         if !ent.paid() {
             self.apply_free_limits(&mut snap);
@@ -759,6 +760,9 @@ impl Engine {
         let gemini_allowance = self.gemini_daily_allowance();
         snap.daily_recap = crate::recap::build_daily_recap(&self.store, &snap.tools, gemini_allowance, self.settings.show_daily_recap, now)?;
         snap.weekly_recap = crate::recap::build_weekly_recap(&self.store, &snap.tools, gemini_allowance, now)?;
+        if self.settings.suggest_chips {
+            snap.suggestions = crate::suggest::from_snapshot(&snap, now);
+        }
         if let Some(tool) = snap.tools.iter().find(|t| Some(t.tool) == snap.active_tool && t.enabled && !t.locked) {
             let binding = tool.windows.iter().filter(|w| w.source != Source::Learning)
                 .min_by(|a, b| a.headroom_pct.total_cmp(&b.headroom_pct));

@@ -160,6 +160,11 @@ fn context_for(c: &Captured, repo: Option<String>) -> Context {
 
 /// Run one CLI to the end, sending each piece of the answer as it arrives.
 fn run_one(app: &AppHandle, id: &str, tool: Tool, mode: Mode, prompt: &str, image: Option<&std::path::Path>) -> (String, Option<String>) {
+    run_cli(Some(app), id, tool, mode, prompt, image)
+}
+
+/// Run a CLI and collect its answer; with `app`, stream it to the widget too.
+fn run_cli(app: Option<&AppHandle>, id: &str, tool: Tool, mode: Mode, prompt: &str, image: Option<&std::path::Path>) -> (String, Option<String>) {
     let Some(cli) = aiuc_core::handoff::cli(tool) else { return (String::new(), Some("That CLI isn't installed.".into())) };
     let cmd = ask::command(tool, &cli, mode, prompt, image);
     let dir = capture::temp_dir();
@@ -190,7 +195,7 @@ fn run_one(app: &AppHandle, id: &str, tool: Tool, mode: Mode, prompt: &str, imag
         for line in BufReader::new(out).lines().map_while(Result::ok) {
             if let Some(piece) = reader.line(tool, &line) {
                 answer.push_str(&piece);
-                let _ = app.emit("ask-delta", Delta { id, text: &piece });
+                if let Some(app) = app { let _ = app.emit("ask-delta", Delta { id, text: &piece }); }
             }
         }
     }
@@ -361,4 +366,30 @@ pub fn ask_points() -> serde_json::Value {
 #[tauri::command]
 pub fn ask_hide_points(app: AppHandle) {
     if let Some(w) = app.get_webview_window("pointer") { let _ = w.hide(); }
+}
+
+// ---------- prompt polish (Gemini's polish.rs) ----------
+
+/// Rewrite a rough prompt with the repo's context, on the tool with most room
+/// (Quick mode). `repo` is a repo id from the Agents box, or none.
+#[tauri::command]
+pub async fn polish_prompt(state: State<'_, AppState>, text: String, repo: Option<String>) -> CmdResult<String> {
+    if text.trim().is_empty() { return Ok(text); }
+    let root = match repo.as_deref() {
+        Some(id) => match crate::dispatch::resolve(&state.engine, id)? { crate::dispatch::Repo::Local(r) => Some(r), crate::dispatch::Repo::GitHub(_) => None },
+        None => current_repo(&state).map(std::path::PathBuf::from),
+    };
+    // The newest failed test output for this repo, if the widget holds one.
+    let snap = state.last.lock().map_err(err)?.clone();
+    let failure = snap.and_then(|s| s.agents.iter()
+        .filter(|a| a.verify.as_deref() == Some("failed"))
+        .filter(|a| root.as_ref().is_none_or(|r| std::path::Path::new(&a.cwd).starts_with(r) || a.cwd.contains(&*r.file_name().map(|n| n.to_string_lossy()).unwrap_or_default())))
+        .find_map(|a| crate::agents::verify_output(a.id)));
+    let pick = ask::pick(&rooms(&state), None).ok_or("Polishing needs Claude Code, Codex or Gemini installed.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let ctx = aiuc_core::polish::gather(root.as_deref(), failure.as_deref());
+        let (out, e) = run_cli(None, &format!("polish{}", chrono::Utc::now().timestamp_millis()), pick.tool, Mode::Quick, &aiuc_core::polish::request(&text, &ctx), None);
+        if let Some(e) = e { return Err(e); }
+        Ok(aiuc_core::polish::clean(&out))
+    }).await.map_err(err)?
 }

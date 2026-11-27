@@ -2,6 +2,8 @@ mod agents;
 mod ask;
 mod autosend;
 mod capture;
+mod clipboard_watch;
+mod watch;
 mod claude_web;
 mod dispatch;
 mod hover;
@@ -719,6 +721,7 @@ fn spawn_worker(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Opti
                 }
                 ticker.poll();
                 ticker.tick(&app, &engine, &snap);
+                watch::tick(&app, &engine, &snap);
                 let _ = app.emit("snapshot", &snap);
                 if let Ok(mut l) = last.lock() {
                     *l = Some(snap);
@@ -840,6 +843,7 @@ pub fn run() {
             ask::ask_open_in,
             ask::ask_points,
             ask::ask_hide_points,
+            ask::polish_prompt,
             agents::answer_approval,
             agents::verify_task,
             agents::verify_output,
@@ -858,6 +862,9 @@ pub fn run() {
             platform,
             dismiss_alert,
             dismiss_daily_recap,
+            watch::add_watch,
+            watch::list_watches,
+            watch::remove_watch,
             alert_action,
             accept_nudge,
             accept_audit,
@@ -948,6 +955,7 @@ pub fn run() {
             spawn_worker(app.handle().clone(), engine.clone(), last.clone());
             hover::spawn(app.handle().clone(), hit.clone());
             claude_web::spawn(app.handle().clone(), web.clone(), engine.clone());
+            clipboard_watch::spawn(app.handle().clone(), engine.clone());
             #[cfg(feature = "updater")]
             spawn_updater(app.handle().clone());
             Ok(())

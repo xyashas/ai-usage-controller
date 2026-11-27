@@ -350,9 +350,12 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    the tool's app or web, Listen (Web Speech). "Tell me when…/Remind me…" questions
    go to Gemini's watchers (`add_watch`). History is off by default; the opt-in keeps
    the last 20 Q&A in the webview's localStorage. macOS needs Screen Recording and
-   Accessibility permission. Gemini (branch `gemini/polish-watch-suggest`) builds
-   prompt polish, watchers and suggestion chips against the contract in its prompt;
-   Claude wires `polish_prompt` and the watch tick after merging.
+   Accessibility permission. **Prompt polish / watchers / suggestion chips** were
+   built by Gemini (`core/src/{polish,watch,suggest}.rs`, see HANDOFF-gemini.md);
+   `ask::polish_prompt` runs `polish::request` on the roomiest tool (Quick) with the
+   repo's newest failed-test tail, `watch::tick` runs every worker tick, and
+   "aiuc-ask" window events from chips are handled in App.tsx (fix → Ask,
+   send_failure → Agents box, handoff → Handoff tab).
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).

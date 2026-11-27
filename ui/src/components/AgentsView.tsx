@@ -10,6 +10,8 @@ import { usd } from "../format";
 import { TopBar } from "./TopBar";
 import { ToolMark } from "./ToolMark";
 import { BranchIcon, CloseIcon, MicIcon } from "./icons";
+import { PolishButton, PolishDiffCard, usePromptPolish } from "./PromptPolish";
+import { Watches } from "./Watches";
 
 const mac = navigator.userAgent.includes("Mac");
 
@@ -149,6 +151,7 @@ export function AgentsView({ snap, onView, refresh, prefill, onPrefilled }: { sn
   const [result, setResult] = useState<Started[] | null>(null);
   const [err, setErr] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  const polish = usePromptPolish(text, repo || null);
 
   // Text handed over from Ask ("Fix it with an agent", "Make it a task").
   useEffect(() => { if (prefill) { setText(prefill); onPrefilled?.(); } }, [prefill]);
@@ -312,12 +315,17 @@ export function AgentsView({ snap, onView, refresh, prefill, onPrefilled }: { sn
             </span>
             Worktrees
           </button>}
-          <button disabled={!runnable || busy} onClick={run} className="btn btn-primary ml-auto !py-1.5">
+          <div className="ml-auto flex items-center gap-1.5">
+          <PolishButton disabled={!text.trim() || busy} busy={polish.busy} onClick={polish.polish} />
+          <button disabled={!runnable || busy} onClick={run} className="btn btn-primary !py-1.5">
             {busy ? "Sending…" : tasks.length && tasks.every((t) => t.queue) ? (tasks.length > 1 ? `Queue ${tasks.length} tasks` : "Queue") : tasks.length > 1 ? `Run ${tasks.length} tasks` : "Run"}
             <span className="text-[10.5px] font-medium opacity-50">{mac ? "⌘↵" : "Ctrl↵"}</span>
           </button>
+          </div>
         </div>
       </section>
+      {polish.error && <p className="px-1 text-[11.5px] text-bad">{polish.error}</p>}
+      {polish.draft && <PolishDiffCard original={polish.draft.original} polished={polish.draft.polished} onAccept={(next) => { setText(next); polish.clear(); }} onKeep={polish.clear} />}
 
       {tasks.length > 0 && (
         <section className="fade-in space-y-1.5">
@@ -411,6 +419,7 @@ export function AgentsView({ snap, onView, refresh, prefill, onPrefilled }: { sn
           Tasks you run show up here with what each agent is doing: working, waiting for you, or done with the tests run. {mac ? "⌥⇧A" : "Alt+Shift+A"} opens this from anywhere.
         </p>
       )}
+      <Watches />
     </div>
   );
 }

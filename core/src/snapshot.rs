@@ -170,4 +170,5 @@ pub struct Snapshot {
     pub remote: Option<RemoteSummary>,
     pub daily_recap: Option<crate::recap::DailyRecap>,
     pub weekly_recap: crate::recap::WeeklyRecap,
+    pub suggestions: Vec<crate::suggest::Suggestion>,
 }

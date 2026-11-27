@@ -12,6 +12,7 @@ import { AuditCard } from "./components/AuditCard";
 import { SettingsView } from "./components/SettingsView";
 import { Onboarding } from "./components/Onboarding";
 import { CheckSetup } from "./components/CheckSetup";
+import { SuggestionChip } from "./components/SuggestionChip";
 
 export type View = "panel" | "ask" | "agents" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
 type Platform = "macos" | "windows" | "linux";
@@ -288,6 +289,7 @@ export default function App() {
           </div>
         )}
       </div>
+      <SuggestionChip snap={snap} open={open} top={pill.top + pill.h + 8} />
     </div>
   );
 }

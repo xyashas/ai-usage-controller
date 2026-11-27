@@ -6,6 +6,7 @@ import { tint, toolName } from "../theme";
 import { ToolMark } from "./ToolMark";
 import { Markdown, plain } from "./Markdown";
 import { BackIcon, CloseIcon, MicIcon } from "./icons";
+import { PolishButton, PolishDiffCard, usePromptPolish } from "./PromptPolish";
 
 const mac = navigator.userAgent.includes("Mac");
 const pref = (k: string, d: string) => { try { return localStorage.getItem(`ask.${k}`) ?? d; } catch { return d; } };
@@ -115,6 +116,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
   const [busy, setBusy] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
+  const polish = usePromptPolish(text, null);
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
 
@@ -341,15 +343,19 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
           >
             Council
           </button>
+          <span className="ml-auto" />
+          {!busy && text.trim().split(/\s+/).length >= 3 && <PolishButton disabled={false} busy={polish.busy} onClick={polish.polish} />}
           {busy ? (
             <button className="btn ml-auto !py-1.5" onClick={stop}>Stop</button>
           ) : (
-            <button disabled={!text.trim() && !(items.length === 0 && (ctx?.selection || ctx?.screenshot))} className="btn btn-primary ml-auto !py-1.5" onClick={() => ask(text)}>
+            <button disabled={!text.trim() && !(items.length === 0 && (ctx?.selection || ctx?.screenshot))} className="btn btn-primary !py-1.5" onClick={() => ask(text)}>
               Ask <span className="text-[10.5px] font-medium opacity-50">↵</span>
             </button>
           )}
         </div>
       </section>
+      {polish.error && <p className="px-1 text-[11.5px] text-bad">{polish.error}</p>}
+      {polish.draft && <PolishDiffCard original={polish.draft.original} polished={polish.draft.polished} onAccept={(next) => { setText(next); polish.clear(); box.current?.focus(); }} onKeep={polish.clear} />}
       <p className="px-1 text-[10.5px] text-mute">
         {mac ? "⌥⇧Space" : "Alt+Shift+Space"} from anywhere. Uses the AI tools you already have; {pref("history", "0") === "1" ? "the last 20 answers are kept on this computer" : "nothing is saved"}.
       </p>

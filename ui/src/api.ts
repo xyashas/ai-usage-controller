@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
+import type { AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool, Suggestion, Watch } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -31,8 +31,6 @@ export const api = {
   askOpenIn: (tool: Tool, text: string) => call<string>("ask_open_in", { tool, text }),
   askPoints: () => call<{ fx: number; fy: number; label: string }[] | null>("ask_points"),
   askHidePoints: () => call<void>("ask_hide_points"),
-  /** Gemini's watchers (watch.rs): "tell me when Claude resets". */
-  addWatch: (text: string) => call<{ id: string; label: string }>("add_watch", { text }),
   answerApproval: (id: string, answer: ApprovalAnswer) => call<void>("answer_approval", { id, answer }),
   verifyTask: (id: number) => call<void>("verify_task", { id }),
   verifyOutput: (id: number) => call<string | null>("verify_output", { id }),
@@ -62,6 +60,10 @@ export const api = {
   diagnostics: () => call<Diagnostics>("diagnostics"),
   dismiss: (id: string) => call<void>("dismiss_alert", { id }),
   dismissDailyRecap: () => call<void>("dismiss_daily_recap"),
+  polishPrompt: (text: string, repo: string | null) => call<string>("polish_prompt", { text, repo }),
+  addWatch: (text: string) => call<Watch>("add_watch", { text }),
+  listWatches: () => call<Watch[]>("list_watches"),
+  removeWatch: (id: string) => call<void>("remove_watch", { id }),
   alertAction: (alert: Alert) => call<string>("alert_action", { id: alert.id }),
   acceptNudge: () => call<void>("accept_nudge"),
   acceptAudit: (tool: Tool) => call<void>("accept_audit", { tool }),
@@ -117,6 +119,18 @@ export async function onPoints(cb: (spots: { fx: number; fy: number; label: stri
   return listen<{ fx: number; fy: number; label: string }[]>("points", (e) => cb(e.payload));
 }
 
+export async function onSuggestion(cb: (s: Suggestion) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<Suggestion>("suggestion", (e) => cb(e.payload));
+}
+
+export async function onWatchesChanged(cb: () => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("watches-changed", () => cb());
+}
+
 export async function onOpenView(cb: (v: string) => void): Promise<() => void> {
   if (!inTauri) {
     const preview = new URLSearchParams(location.search).get("view");
@@ -155,8 +169,13 @@ let mockSettings: Settings = {
   verify_done: true,
   show_daily_recap: true,
   ask_screenshots: true,
+  polish_auto: false,
+  suggest_chips: true,
 };
 const dismissed = new Set<string>();
+let mockWatches: Watch[] = [
+  { id: "w-1", condition: { kind: "limit_reset", tool: "claude_code" }, label: "When Claude resets", created_at: inMin(-15) },
+];
 let mockGithub: string | null = null;
 const extra = { queued_until: null, verify: null, verify_secs: null, verify_at: null } as const;
 const mockAgents: Snapshot["agents"] = mockScenario === "empty" ? [] : [
@@ -264,6 +283,9 @@ function mockSnapshot(): Snapshot {
       handoffs_count: 3,
       total_limit_hits: 2,
     } : { tools: [], busiest_hours: [], hourly_requests: Array(24).fill(0), handoffs_count: 0, total_limit_hits: 0 },
+    suggestions: mockSettings.suggest_chips && mockScenario === "critical" ? [
+      { id: "limit-mid-task:claude_code:codex", kind: { kind: "limit_mid_task", tool: "claude_code", to: "codex" }, title: "Hand off to Codex?", detail: "Claude at 96% mid-task", action: "handoff" },
+    ] : [],
   };
 }
 
@@ -351,7 +373,6 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     case "ask_start": mockAnswer(args!.req as AskRequest); return null;
     case "ask_run": return "Typed into a new terminal. Check it, then press Enter.";
     case "ask_open_in": return "Sent to Claude Code in the Claude app";
-    case "add_watch": return { id: "w1", label: String(args!.text) };
     case "answer_approval": dismissed.add(`approval:${args!.id}`); return null;
     case "run_queued": { const a = mockAgents.find((x) => x.id === args!.id); if (a) { a.state = "starting"; a.queued_until = null; if (args!.tool) a.tool = args!.tool as Tool; } return "Started in a terminal"; }
     case "verify_task": { const a = mockAgents.find((x) => x.id === args!.id); if (a) a.verify = "running"; return null; }
@@ -377,6 +398,20 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     ];
     case "dismiss_alert": dismissed.add(args!.id as string); return null;
     case "dismiss_daily_recap": dismissed.add("daily_recap"); return null;
+    case "polish_prompt": {
+      const raw = String(args!.text ?? "").trim();
+      const repoLabel = args!.repo ? ` in ${String(args!.repo).split(/[\\/]/).pop()}` : "";
+      return `${raw}${repoLabel}. Keep edits scoped to the affected files, follow AGENTS.md conventions, and verify the relevant tests and build pass before finishing.`;
+    }
+    case "list_watches": return [...mockWatches];
+    case "add_watch": {
+      const label = String(args!.text ?? "").trim();
+      if (!label) throw new Error("Couldn't understand that watch.");
+      const w: Watch = { id: `w-${Date.now()}`, condition: { kind: "at", at: inMin(20) }, label, created_at: now().toISOString() };
+      mockWatches = [...mockWatches, w];
+      return w;
+    }
+    case "remove_watch": mockWatches = mockWatches.filter((w) => w.id !== args!.id); return null;
     case "accept_nudge": dismissed.add("nudge"); return null;
     case "alert_action": dismissed.add(args!.id as string); return "ok";
     case "start_trial": mockTier = "trial"; return null;

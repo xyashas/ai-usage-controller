@@ -85,6 +85,10 @@ pub struct Settings {
     pub show_daily_recap: bool,
     /// Ask the notch: include a screenshot of the window you're in.
     pub ask_screenshots: bool,
+    /// Polish tasks automatically before sending.
+    pub polish_auto: bool,
+    /// Show proactive suggestion chips sliding down from the notch.
+    pub suggest_chips: bool,
 }
 
 impl Default for Settings {
@@ -112,6 +116,8 @@ impl Default for Settings {
             verify_done: true,
             ask_screenshots: true,
             show_daily_recap: true,
+            polish_auto: false,
+            suggest_chips: true,
         }
     }
 }
