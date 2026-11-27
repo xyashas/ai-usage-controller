@@ -8,7 +8,7 @@
 //! Windows: a pill at top centre.
 
 use serde::{Deserialize, Serialize};
-use tauri::{LogicalPosition, LogicalSize, Manager, Runtime, WebviewWindow};
+use tauri::{LogicalSize, Manager, PhysicalPosition, Runtime, WebviewWindow};
 
 /// The window's fixed size. The panel is at most 520×640; the extra leaves room
 /// for its shadow.
@@ -84,19 +84,22 @@ pub fn mac_float<R: Runtime>(win: &WebviewWindow<R>) {
 #[cfg(not(target_os = "macos"))]
 pub fn mac_float<R: Runtime>(_win: &WebviewWindow<R>) {}
 
-/// Size the window and pin it to the top centre of its monitor.
+/// Size the window and pin it to the top centre of its monitor's work area
+/// (respects top/side taskbars, mixed-DPI scaling, and negative secondary monitor coordinates).
 pub fn place<R: Runtime>(win: &WebviewWindow<R>) -> tauri::Result<()> {
     let (w, h) = WINDOW;
     let monitor = win.current_monitor()?.or(win.primary_monitor()?);
-    let (mx, my, mw) = match &monitor {
-        Some(m) => {
-            let s = m.scale_factor();
-            (m.position().x as f64 / s, m.position().y as f64 / s, m.size().width as f64 / s)
-        }
-        None => (0.0, 0.0, 1440.0),
-    };
     win.set_size(LogicalSize::new(w, h))?;
-    win.set_position(LogicalPosition::new(mx + (mw - w) / 2.0, my))?;
+    if let Some(m) = &monitor {
+        let s = m.scale_factor().max(0.5);
+        let wa = m.work_area();
+        let phys_w = (w * s).round() as i32;
+        let x = wa.position.x + ((wa.size.width as i32) - phys_w) / 2;
+        let y = wa.position.y;
+        win.set_position(PhysicalPosition::new(x, y))?;
+    } else {
+        win.set_position(PhysicalPosition::new(430, 0))?;
+    }
     Ok(())
 }
 

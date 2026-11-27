@@ -31,7 +31,13 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
+/// Returns true only for HTTPS URLs targeting `api.github.com`.
+pub fn is_api_url(url: &str) -> bool {
+    url.starts_with("https://api.github.com/")
+}
+
 fn get(token: &str, url: &str) -> Result<Value> {
+    anyhow::ensure!(is_api_url(url), "Refusing to send GitHub token outside api.github.com");
     let mut res = agent().get(url)
         .header("Authorization", &format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")

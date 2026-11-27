@@ -174,15 +174,14 @@ pub fn spawn(app: AppHandle, engine: Arc<Mutex<Engine>>, last: Arc<Mutex<Option<
                 }
             };
 
-            if !enabled || token.is_none() {
+            let Some(token) = token.filter(|_| enabled) else {
                 seeded = false;
                 if let Ok(mut s) = state().lock() {
                     s.runs.clear();
                 }
                 std::thread::sleep(POLL_INTERVAL);
                 continue;
-            }
-            let token = token.unwrap();
+            };
 
             let (repos, task_branches) = watched_repos_and_branches(&engine, &last);
             let mut fetched = Vec::new();

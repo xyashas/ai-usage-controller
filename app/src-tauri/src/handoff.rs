@@ -121,7 +121,8 @@ pub fn destinations(target: Tool, local_folder: bool) -> Vec<DestOption> {
 
 fn copy(mut command: Command, prompt: &str) -> bool {
     let Ok(mut child) = command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else { return false };
-    let written = child.stdin.take().unwrap().write_all(prompt.as_bytes()).is_ok();
+    let Some(mut stdin) = child.stdin.take() else { return false; };
+    let written = stdin.write_all(prompt.as_bytes()).is_ok();
     child.wait().is_ok_and(|s| s.success()) && written
 }
 
