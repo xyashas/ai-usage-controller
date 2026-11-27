@@ -84,6 +84,7 @@ export interface Snapshot {
   daily_recap: DailyRecap | null;
   weekly_recap: WeeklyRecap;
   suggestions: Suggestion[];
+  autopilot_moves: AutopilotMove[];
 }
 
 export interface Plan { id: string; name: string; price: number; capacity: number; metered?: boolean; daily_requests?: number | null }
@@ -108,6 +109,8 @@ export interface Settings {
   show_daily_recap: boolean;
   polish_auto: boolean;
   suggest_chips: boolean;
+  autopilot: boolean;
+  ci_watch: boolean;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
 export type Mode = "collapsed" | "expanded";
@@ -228,4 +231,17 @@ export interface Suggestion {
   title: string;
   detail: string;
   action: "ask_fix" | "send_failure" | "handoff";
+  text?: string | null;
+}
+
+export interface AutopilotMove { task_id: number; to: Tool; at: string }
+export interface CiRun {
+  id: number;
+  repo: string;
+  branch: string;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  html_url: string;
+  updated_at: string;
 }

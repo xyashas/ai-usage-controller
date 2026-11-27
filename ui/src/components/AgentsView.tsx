@@ -11,6 +11,7 @@ import { TopBar } from "./TopBar";
 import { ToolMark } from "./ToolMark";
 import { BranchIcon, CloseIcon, MicIcon } from "./icons";
 import { PolishButton, PolishDiffCard, usePromptPolish } from "./PromptPolish";
+import { CiRuns } from "./CiRuns";
 import { Watches } from "./Watches";
 
 const mac = navigator.userAgent.includes("Mac");
@@ -52,7 +53,7 @@ function Verify({ a, open, onToggle, onRun }: { a: AgentRun; open: boolean; onTo
   return null;
 }
 
-function AgentRow({ a, refresh, roomiest }: { a: AgentRun; refresh: () => void; roomiest: (not: Tool) => Tool | null }) {
+function AgentRow({ a, refresh, roomiest, handedTo }: { a: AgentRun; refresh: () => void; roomiest: (not: Tool) => Tool | null; handedTo?: Tool }) {
   const c = tint[a.tool];
   const [out, setOut] = useState<string | null>(null);
   const [err, setErr] = useState("");
@@ -74,6 +75,7 @@ function AgentRow({ a, refresh, roomiest }: { a: AgentRun; refresh: () => void; 
             <span>{a.repo_name}</span>
             {a.branch && <><span>·</span><BranchIcon /><span className="truncate">{a.branch}</span></>}
             {a.dest && a.dest !== "terminal" && <span>· {a.dest === "web" ? "web" : "app"}</span>}
+            {handedTo && <span className="text-accent">· Handed to {toolName[handedTo]}</span>}
           </p>
         </div>
         <div className="shrink-0 text-right">
@@ -412,13 +414,14 @@ export function AgentsView({ snap, onView, refresh, prefill, onPrefilled }: { sn
       </div>
       {live.length ? (
         <section className="tile !p-1">
-          {live.map((a) => <AgentRow key={a.id} a={a} refresh={refresh} roomiest={roomiest} />)}
+          {live.map((a) => <AgentRow key={a.id} a={a} refresh={refresh} roomiest={roomiest} handedTo={snap.autopilot_moves?.find((m) => m.task_id === a.id)?.to} />)}
         </section>
       ) : (
         <p className="px-1 pb-1 text-[12px] leading-relaxed text-muted">
           Tasks you run show up here with what each agent is doing: working, waiting for you, or done with the tests run. {mac ? "⌥⇧A" : "Alt+Shift+A"} opens this from anywhere.
         </p>
       )}
+      <CiRuns />
       <Watches />
     </div>
   );

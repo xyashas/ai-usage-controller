@@ -97,6 +97,8 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         <Toggle label="Paste and send tasks automatically" on={s.auto_send} set={(v) => update({ ...s, auto_send: v })} />
         <Toggle label="Polish tasks before sending" on={s.polish_auto} set={(v) => update({ ...s, polish_auto: v })} />
         <Toggle label="Suggest actions" on={s.suggest_chips} set={(v) => update({ ...s, suggest_chips: v })} />
+        <Toggle label="Hand off automatically at the limit" on={s.autopilot} set={(v) => update({ ...s, autopilot: v })} />
+        <Toggle label="Watch CI on agent branches" on={s.ci_watch} set={(v) => update({ ...s, ci_watch: v })} />
         <p className="text-[11px] leading-relaxed text-muted">
           When a task or handoff opens in an app or the web, the widget pastes it and presses Enter once that window is in front. It never types into any other window.
           {navigator.userAgent.includes("Mac") ? " On a Mac, allow AI Usage Controller under System Settings → Privacy & Security → Accessibility." : ""}

@@ -753,6 +753,7 @@ impl Engine {
                 total_limit_hits: 0,
             },
             suggestions: vec![],
+            autopilot_moves: crate::autopilot::load_moves(&self.store, now),
         };
         if !ent.paid() {
             self.apply_free_limits(&mut snap);

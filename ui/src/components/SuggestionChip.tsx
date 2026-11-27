@@ -54,7 +54,7 @@ export function SuggestionChip({ snap, open, top }: { snap: Snapshot; open: bool
         active.action === "ask_fix"
           ? "Fix the error on my clipboard"
           : active.action === "send_failure"
-          ? "Fix the failing tests"
+          ? (active.text ?? "Fix the failing tests")
           : active.detail,
     };
     if (active.kind.kind === "limit_mid_task") {
