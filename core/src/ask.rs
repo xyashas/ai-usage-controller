@@ -230,10 +230,11 @@ pub fn pick(rooms: &[Room], pinned: Option<Tool>) -> Option<Pick> {
         }
     }
     let best = ok.iter().min_by(|a, b| a.used_pct.unwrap_or(50.0).total_cmp(&b.used_pct.unwrap_or(50.0)))?;
-    let full: Vec<String> = rooms.iter().filter(|r| r.tool != best.tool && r.used_pct.is_some_and(|u| u >= 80.0))
-        .map(|r| format!("{} is at {:.0}%", tool_label(r.tool), r.used_pct.unwrap())).collect();
+    let full: Vec<String> = rooms.iter()
+        .filter_map(|r| r.used_pct.filter(|&u| r.tool != best.tool && u >= 80.0).map(|u| format!("{} is at {u:.0}%", tool_label(r.tool))))
+        .collect();
     let reason = if !full.is_empty() { full.join(", ") }
-        else if pinned.is_some_and(|p| p != best.tool) { format!("{} is out of room", tool_label(pinned.unwrap())) }
+        else if let Some(p) = pinned.filter(|&p| p != best.tool) { format!("{} is out of room", tool_label(p)) }
         else if ok.len() == 1 { "the only one installed".into() }
         else { "most room".into() };
     Some(Pick { tool: best.tool, reason })

@@ -62,7 +62,7 @@ function SetupSheet({ repo, onDone, onCancel }: { repo: RepoStatus; onDone: (r: 
       <div className="flex gap-1.5">
         <button disabled={busy} className="btn btn-primary grow" onClick={() => run(true)}>{busy ? "Setting up…" : `Set up and commit on ${repo.current_branch || "this branch"}`}</button>
         <button disabled={busy} className="btn" onClick={() => run(false)}>Files only</button>
-        <button disabled={busy} className="icon-btn" aria-label="Cancel" onClick={onCancel}><CloseIcon /></button>
+        <button disabled={busy} className="icon-btn" aria-label="Cancel" title="Cancel" onClick={onCancel}><CloseIcon /></button>
       </div>
       <p className="text-[11px] text-mute">Nothing is pushed. Push the commit so cloud agents get it.</p>
       {err && <p className="text-[11.5px] text-bad">{err}</p>}

@@ -90,6 +90,7 @@ export function Watches() {
                 <button
                   type="button"
                   aria-label={`Remove watch ${w.label}`}
+                  title="Remove watch"
                   onClick={() => remove(w.id)}
                   className="icon-btn -mr-1 shrink-0 opacity-60 hover:opacity-100"
                 >

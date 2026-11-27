@@ -233,7 +233,7 @@ export function AskView({ onView, onTask, init }: { onView: (v: View) => void; o
   return (
     <div className="flex flex-col gap-2.5 p-3">
       <header className="flex items-center gap-2 px-1">
-        <button className="icon-btn" aria-label="Back" onClick={() => { stop(); onView("panel"); }}><BackIcon /></button>
+        <button className="icon-btn" aria-label="Back" title="Back" onClick={() => { stop(); onView("panel"); }}><BackIcon /></button>
         <h2 className="text-[15px] font-semibold tracking-tight">Ask</h2>
         <div className="ml-auto flex items-center gap-1.5">
           <button

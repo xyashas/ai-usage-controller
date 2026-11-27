@@ -248,13 +248,15 @@ fn ours(h: &Value) -> bool {
 pub fn merge_claude_hooks(settings: &mut Value, command: &str, approvals: bool) {
     remove_claude_hooks(settings);
     if !settings.is_object() { *settings = serde_json::json!({}); }
-    let hooks = settings.as_object_mut().unwrap().entry("hooks").or_insert_with(|| serde_json::json!({}));
+    let Some(root) = settings.as_object_mut() else { return };
+    let hooks = root.entry("hooks").or_insert_with(|| serde_json::json!({}));
     if !hooks.is_object() { *hooks = serde_json::json!({}); }
+    let Some(hooks) = hooks.as_object_mut() else { return };
     for (event, matcher, timeout) in EVENTS {
         if event == "PermissionRequest" && !approvals { continue; }
         let mut group = serde_json::json!({ "hooks": [{ "type": "command", "command": command, "timeout": timeout }] });
         if let Some(m) = matcher { group["matcher"] = m.into(); }
-        let list = hooks.as_object_mut().unwrap().entry(event).or_insert_with(|| serde_json::json!([]));
+        let list = hooks.entry(event).or_insert_with(|| serde_json::json!([]));
         if let Some(a) = list.as_array_mut() { a.push(group); } else { *list = serde_json::json!([group]); }
     }
 }

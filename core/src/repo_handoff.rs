@@ -62,7 +62,8 @@ pub fn merge_settings(existing: &str) -> Result<String> {
     if !present {
         if !v["hooks"].is_object() { v["hooks"] = json!({}); }
         if !v["hooks"]["Stop"].is_array() { v["hooks"]["Stop"] = json!([]); }
-        v["hooks"]["Stop"].as_array_mut().unwrap().push(json!({ "hooks": [{ "type": "command", "command": HOOK_COMMAND, "timeout": 20 }] }));
+        if !v["hooks"]["Stop"].is_array() { v["hooks"]["Stop"] = json!([]); }
+        if let Some(arr) = v["hooks"]["Stop"].as_array_mut() { arr.push(json!({ "hooks": [{ "type": "command", "command": HOOK_COMMAND, "timeout": 20 }] })); }
     }
     Ok(serde_json::to_string_pretty(&v)? + "\n")
 }
@@ -279,8 +280,8 @@ fn git_with_timeout(dir: &Path, args: &[&str], timeout: Duration) -> Result<Stri
     }
     let mut child = cmd.spawn().map_err(|_| anyhow!("Git isn't installed or couldn't start."))?;
     // Read output on threads so a chatty command can't fill the pipe and stall.
-    let mut out = child.stdout.take().unwrap();
-    let mut err = child.stderr.take().unwrap();
+    let mut out = child.stdout.take().ok_or_else(|| anyhow!("git stdout unavailable"))?;
+    let mut err = child.stderr.take().ok_or_else(|| anyhow!("git stderr unavailable"))?;
     let out_t = std::thread::spawn(move || { let mut s = Vec::new(); let _ = std::io::Read::read_to_end(&mut out, &mut s); s });
     let err_t = std::thread::spawn(move || { let mut s = Vec::new(); let _ = std::io::Read::read_to_end(&mut err, &mut s); s });
     let start = Instant::now();

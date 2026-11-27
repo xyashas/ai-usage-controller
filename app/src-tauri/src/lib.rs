@@ -143,7 +143,7 @@ async fn launch_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>
         let draft = guard.as_ref().filter(|d| d.id == id).ok_or("Preview this session again.")?;
         let auto = engine.lock().map_err(err)?.settings.auto_send;
         let msg = handoff::launch(draft.cwd.as_deref(), draft.target, dest, &prompt, auto)?;
-        if let Ok(eng) = engine.lock() { let _ = eng.record_handoff(Utc::now()); }
+        if let Ok(mut eng) = engine.lock() { let _ = eng.record_handoff(Utc::now()); }
         *guard = None;
         Ok(msg)
     }).await.map_err(err)?
@@ -768,8 +768,30 @@ fn _keep(_: CDuration) {}
 
 pub use agents::hook_main;
 
+fn install_panic_hook() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let log_path = aiuc_core::paths::app_data_dir().join("crash.log");
+        if let Some(dir) = log_path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+            use std::io::Write;
+            let loc = info
+                .location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_else(|| "unknown".into());
+            let _ = writeln!(f, "[{}] panic at {}", Utc::now().to_rfc3339(), loc);
+        }
+        prev(info);
+    }));
+}
+
 pub fn run() {
-    let engine = Engine::open_default().expect("open usage database");
+    install_panic_hook();
+    let (engine, recovered_db) = Engine::open_default_or_recover().unwrap_or_else(|_| {
+        (Engine::in_memory().expect("in-memory fallback database"), true)
+    });
     let hotkey = engine.settings.hotkey.clone();
     let engine = Arc::new(Mutex::new(engine));
     let last = Arc::new(Mutex::new(None));
@@ -921,7 +943,14 @@ pub fn run() {
                 eprintln!("hotkey {DISPATCH_HOTKEY} unavailable: {e}");
             }
 
+            if recovered_db {
+                notify(app.handle(), "Database recovered", "Your previous usage database was corrupted, backed up, and a fresh one was started.");
+            }
             if let Ok(eng) = engine.lock() {
+                if eng.store.kv_get("recovered_settings").ok().flatten().as_deref() == Some("1") {
+                    let _ = eng.store.kv_del("recovered_settings");
+                    notify(app.handle(), "Settings reset", "Your previous settings were corrupted, backed up, and reset to defaults.");
+                }
                 if let Err(e) = apply_autostart(app.handle(), &eng.settings) {
                     eprintln!("Could not update launch at login: {e}");
                 }

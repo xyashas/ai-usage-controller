@@ -104,6 +104,13 @@ jobs:
           node-version: 22
       - run: npm ci --prefix ui
       - run: npm run build --prefix ui
+      # Every view and scenario renders without errors or overflow; main flows click through.
+      - run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - run: npm run test:e2e
+        working-directory: ui
+        env:
+          CI: "1"
 
   api:
     name: API tests

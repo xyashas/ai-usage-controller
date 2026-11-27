@@ -66,7 +66,7 @@ export function HandoffPreview({ draft, onBack }: { draft: Draft; onBack: () => 
   return (
     <section className="flex flex-col gap-3 p-3">
       <header className="flex items-center gap-2 px-1">
-        <button disabled={busy} className="icon-btn" aria-label="Back" onClick={onBack}><BackIcon /></button>
+        <button disabled={busy} className="icon-btn" aria-label="Back" title="Back" onClick={onBack}><BackIcon /></button>
         <div className="min-w-0">
           <h2 className="flex items-center gap-1.5 text-[15px] font-semibold tracking-tight"><ToolMark tool={draft.target} />Continue in {toolName[draft.target]}</h2>
           <p className="truncate text-[11.5px] text-muted">{draft.source ? `From ${toolName[draft.source]}` : "From the repo's handoff"}{data?.place ? ` · ${data.place}` : ""}</p>

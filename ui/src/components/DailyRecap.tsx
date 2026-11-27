@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { DailyRecap as DailyRecapData } from "../types";
 import { ToolMark } from "./ToolMark";
 import { tint } from "../theme";
@@ -10,7 +10,7 @@ function clockTime(iso: string): string {
 }
 
 /** Morning brief card shown at the top of Usage on first open each day. */
-export function DailyRecap({ recap, onDismiss }: { recap: DailyRecapData; onDismiss: () => void }) {
+export const DailyRecap = memo(function DailyRecap({ recap, onDismiss }: { recap: DailyRecapData; onDismiss: () => void }) {
   const resets = recap.tools
     .flatMap((t) => {
       const out: { key: string; label: string; at: string }[] = [];
@@ -41,7 +41,7 @@ export function DailyRecap({ recap, onDismiss }: { recap: DailyRecapData; onDism
             {recap.open_tasks_yesterday > 0 && <span className="text-warn"> · {recap.open_tasks_yesterday} open {recap.open_tasks_yesterday === 1 ? "task" : "tasks"}</span>}
           </p>
         </button>
-        <button type="button" onClick={() => setOpen((o) => !o)} aria-label={open ? "Hide details" : "Show details"} className="icon-btn shrink-0">
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-label={open ? "Hide details" : "Show details"} title={open ? "Hide details" : "Show details"} className="icon-btn shrink-0">
           <svg viewBox="0 0 16 16" className={`h-3.5 w-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6l4 4 4-4" /></svg>
         </button>
         <button type="button" onClick={onDismiss} aria-label="Dismiss morning brief" title="Dismiss for today" className="icon-btn shrink-0 text-[15px] leading-none">×</button>
@@ -84,4 +84,4 @@ export function DailyRecap({ recap, onDismiss }: { recap: DailyRecapData; onDism
       </div>
     </section>
   );
-}
+});

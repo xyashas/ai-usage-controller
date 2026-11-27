@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","cwd":"/workspace/demo","session_id":"sess-claude-001","tools":["Read"],"model":"claude-haiku-4-5-20251001"}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","content":[]}}}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"The test "}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"failed because "}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"the fixture timestamp was stale."}}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0}}
+{"type":"assistant","message":{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"The test failed because the fixture timestamp was stale."}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":412,"result":"The test failed because the fixture timestamp was stale."}
