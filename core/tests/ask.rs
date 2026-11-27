@@ -58,6 +58,7 @@ fn commands_are_read_only_and_non_interactive() {
     assert_eq!(x.args.last().unwrap(), "-");
     let g = ask::command(Tool::Gemini, Path::new("gemini"), Mode::Deep, "hi", Some(Path::new("/tmp/s.png")));
     assert!(g.args[1].starts_with("@/tmp/s.png"));
+    assert!(!g.args.contains(&"-m".to_string()), "no Gemini model name to go stale");
 }
 
 #[test]

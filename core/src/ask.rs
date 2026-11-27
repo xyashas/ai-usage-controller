@@ -263,9 +263,10 @@ pub fn command(tool: Tool, cli: &Path, mode: Mode, prompt: &str, image: Option<&
         Tool::Gemini => {
             // Gemini adds stdin to the -p prompt; @path attaches the screenshot.
             let lead = match image { Some(i) => format!("@{} Answer the request below.", i.display()), None => "Answer the request below.".into() };
-            let mut args = s(&["-p", &lead]);
-            if mode == Mode::Quick { args.extend(s(&["-m", "gemini-2.5-flash"])); }
-            Cmd { program: cli.into(), args, stdin: prompt.into() }
+            // No model name: Google retires them often, and the CLI's default
+            // follows along. (Quick vs Deep only changes the prompt here.)
+            let _ = mode;
+            Cmd { program: cli.into(), args: s(&["-p", &lead]), stdin: prompt.into() }
         }
     }
 }

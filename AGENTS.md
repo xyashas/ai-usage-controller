@@ -334,7 +334,9 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    ≥98%); `ask::command` runs it headless and read-only: `claude -p --output-format
    stream-json --include-partial-messages --model haiku|opus` (only Read allowed),
    `codex exec --json --sandbox read-only -c model_reasoning_effort=low|high [-i shot] -`,
-   `gemini -p "@shot …"` (+ `-m gemini-2.5-flash` for Quick); the prompt goes on
+   `gemini -p "@shot …"` (no `-m`: Google retires model names; the CLI default follows.
+   Gemini CLI no longer accepts personal Google logins, so it needs GEMINI_API_KEY and
+   `/auth` set to "Use Gemini API key"); the prompt goes on
    stdin, `StreamReader` turns each CLI's output into text deltas (`ask-delta` /
    `ask-done` events). Child processes get `AIUC_ASK=1` so our agent hooks ignore
    them. Questions about limits/agents/tests get `ask::work_brief` (snapshot +
