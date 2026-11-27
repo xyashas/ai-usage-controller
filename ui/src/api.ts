@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
+import type { AskContext, AskDone, AskRequest, Alert, ApprovalAnswer, Dest, InstallResult, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -21,6 +21,18 @@ export const api = {
   runDispatch: (repo: string, tasks: { text: string; tool: Tool; dest: Dest; queue?: boolean }[], worktrees: boolean) => call<Started[]>("run_dispatch", { repo, tasks, worktrees }),
   runQueued: (id: number, tool?: Tool) => call<string>("run_queued", { id, tool: tool ?? null }),
   setAgentStatus: (on: boolean, approvals?: boolean) => call<InstallResult>("set_agent_status", { on, approvals: approvals ?? null }),
+  askContext: (pinned: Tool | null) => call<AskContext>("ask_context", { pinned }),
+  askForget: (part: "selection" | "clipboard" | "screenshot" | "all") => call<void>("ask_forget", { part }),
+  askStart: (req: AskRequest) => call<void>("ask_start", { req }),
+  askCancel: (id: string) => call<void>("ask_cancel", { id }),
+  askPasteBack: (text: string) => call<void>("ask_paste_back", { text }),
+  askCopy: (text: string) => call<void>("ask_copy", { text }),
+  askRun: (command: string) => call<string>("ask_run", { command }),
+  askOpenIn: (tool: Tool, text: string) => call<string>("ask_open_in", { tool, text }),
+  askPoints: () => call<{ fx: number; fy: number; label: string }[] | null>("ask_points"),
+  askHidePoints: () => call<void>("ask_hide_points"),
+  /** Gemini's watchers (watch.rs): "tell me when Claude resets". */
+  addWatch: (text: string) => call<{ id: string; label: string }>("add_watch", { text }),
   answerApproval: (id: string, answer: ApprovalAnswer) => call<void>("answer_approval", { id, answer }),
   verifyTask: (id: number) => call<void>("verify_task", { id }),
   verifyOutput: (id: number) => call<string | null>("verify_output", { id }),
@@ -85,10 +97,30 @@ export async function onHover(cb: (inside: boolean) => void): Promise<() => void
   return listen<boolean>("hover", (e) => cb(e.payload));
 }
 
+/** Streamed pieces of an answer, and the end of it. */
+export async function onAsk(delta: (id: string, text: string) => void, done: (d: AskDone) => void): Promise<() => void> {
+  if (inTauri) {
+    const { listen } = await import("@tauri-apps/api/event");
+    const a = await listen<{ id: string; text: string }>("ask-delta", (e) => delta(e.payload.id, e.payload.text));
+    const b = await listen<AskDone>("ask-done", (e) => done(e.payload));
+    return () => { a(); b(); };
+  }
+  mockAskListeners.push({ delta, done });
+  return () => { mockAskListeners = mockAskListeners.filter((l) => l.delta !== delta); };
+}
+
+let mockAskListeners: { delta: (id: string, text: string) => void; done: (d: AskDone) => void }[] = [];
+
+export async function onPoints(cb: (spots: { fx: number; fy: number; label: string }[]) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<{ fx: number; fy: number; label: string }[]>("points", (e) => cb(e.payload));
+}
+
 export async function onOpenView(cb: (v: string) => void): Promise<() => void> {
   if (!inTauri) {
     const preview = new URLSearchParams(location.search).get("view");
-    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding", "handoffs", "agents"].includes(preview)) cb(preview);
+    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding", "handoffs", "agents", "ask"].includes(preview)) cb(preview);
     return () => {};
   }
   const { listen } = await import("@tauri-apps/api/event");
@@ -122,6 +154,7 @@ let mockSettings: Settings = {
   approvals: true,
   verify_done: true,
   show_daily_recap: true,
+  ask_screenshots: true,
 };
 const dismissed = new Set<string>();
 let mockGithub: string | null = null;
@@ -255,6 +288,28 @@ const mockPlans: Record<Tool, Plan[]> = {
   ],
 };
 
+const mockAnswers: Record<string, string> = {
+  fix: "**Cause:** `cart.summary` is `undefined` when the cart is empty, so reading `.total` throws.\n\nGuard it in `applyCoupon`:\n\n```ts\nconst total = cart.summary?.total ?? 0;\nif (!total) return cart;\n```\n\nThen add a test for an empty cart:\n\n```bash\nnpm test -- checkout/total\n```",
+  work: "- **Codex** is fixing the checkout test (6 min, working).\n- **Claude** finished the coupon API docs. Tests pass.\n- **Claude** is waiting for your OK to run a migration in acme-api.\n\nClaude has **34%** left and resets at **4:12 PM**, so start the big refactor on **Codex** (24% used).",
+  rewrite: "Thanks for the quick turnaround. I've reviewed the changes and they look good. Could you add a test for the empty-cart case before we merge?",
+};
+function mockAnswer(req: AskRequest) {
+  const key = req.action === "fix" || /fix|error|wrong/i.test(req.question) ? "fix" : req.action === "rewrite" || req.action === "professional" || req.action === "shorter" ? "rewrite" : "work";
+  const run = (id: string, tool: Tool, text: string, reason: string, after = 0) => {
+    const words = text.split(/(?<= )/);
+    words.forEach((w, i) => setTimeout(() => mockAskListeners.forEach((l) => l.delta(id, w)), after + i * 18));
+    setTimeout(() => mockAskListeners.forEach((l) => l.done({ id, tool, reason, error: null, points: [], text, opened_web: false })), after + words.length * 18 + 50);
+  };
+  if (req.council) {
+    run(`${req.id}:claude_code`, "claude_code", mockAnswers[key], "");
+    run(`${req.id}:codex`, "codex", mockAnswers[key].replace("Guard it", "Check it"), "");
+    run(`${req.id}:gemini`, "gemini", "Add a null check before reading `total`.", "");
+    run(`${req.id}:combined`, "codex", "**Agree**\n- The crash is `summary` being undefined for empty carts.\n\n**Differ**\n- Gemini only adds a null check; Claude and Codex also return early. Returning early is safer.\n\n**Best answer**\nUse `cart.summary?.total ?? 0` and return the cart unchanged when it's 0, plus an empty-cart test.", "combined by Codex", 1600);
+    return;
+  }
+  run(req.id, req.tool ?? "codex", mockAnswers[key], req.tool ? "your pick" : "Claude is at 96%");
+}
+
 function mock(cmd: string, args?: Record<string, unknown>): unknown {
   switch (cmd) {
     case "test_handoff_offers": return [{ source: "claude_code", session: "s", targets: ["codex", "gemini"] }];
@@ -286,6 +341,17 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       return { tasks, rooms, dests: { claude_code: app("Claude app"), codex: app("ChatGPT app"), gemini: [...(local ? [{ dest: "terminal", label: "Terminal" }] : []), { dest: "web", label: "Web" }] } };
     }
     case "run_dispatch": return (args!.tasks as { text: string; tool: Tool; dest: Dest; queue?: boolean }[]).map((t) => ({ ...t, branch: args!.worktrees && t.dest !== "web" && !t.queue ? "agents/x" : null, message: t.queue ? "Queued. Sends when Claude Code resets at 4:12 PM" : t.dest === "terminal" ? "Started in a terminal" : t.dest === "app" ? "Sent in the app" : "Sent in the browser", delivered: true, error: null }));
+    case "ask_context": return {
+      window: "checkout.ts — acme-web — Visual Studio Code", app: "Visual Studio Code",
+      selection: mockScenario === "empty" ? null : "TypeError: Cannot read properties of undefined (reading 'total')\n    at applyCoupon (src/checkout/total.ts:42:18)",
+      clipboard: null, clipboard_image: false,
+      screenshot: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='100'><rect width='160' height='100' fill='%231e1e1e'/><rect x='0' y='0' width='34' height='100' fill='%23252526'/><rect x='44' y='14' width='90' height='6' rx='2' fill='%23569cd6'/><rect x='44' y='28' width='70' height='6' rx='2' fill='%239cdcfe'/><rect x='44' y='42' width='100' height='6' rx='2' fill='%23f44747'/></svg>",
+      repo: "acme-web", pick: { tool: (args!.pinned as Tool) ?? "codex", reason: args!.pinned ? "your pick" : "Claude is at 96%" }, installed: ["claude_code", "codex", "gemini"],
+    };
+    case "ask_start": mockAnswer(args!.req as AskRequest); return null;
+    case "ask_run": return "Typed into a new terminal. Check it, then press Enter.";
+    case "ask_open_in": return "Sent to Claude Code in the Claude app";
+    case "add_watch": return { id: "w1", label: String(args!.text) };
     case "answer_approval": dismissed.add(`approval:${args!.id}`); return null;
     case "run_queued": { const a = mockAgents.find((x) => x.id === args!.id); if (a) { a.state = "starting"; a.queued_until = null; if (args!.tool) a.tool = args!.tool as Tool; } return "Started in a terminal"; }
     case "verify_task": { const a = mockAgents.find((x) => x.id === args!.id); if (a) a.verify = "running"; return null; }

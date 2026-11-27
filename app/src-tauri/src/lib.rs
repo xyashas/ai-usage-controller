@@ -1,5 +1,7 @@
 mod agents;
+mod ask;
 mod autosend;
+mod capture;
 mod claude_web;
 mod dispatch;
 mod hover;
@@ -777,6 +779,12 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
+                        // Ask looks at your screen first, before the widget takes focus.
+                        let ask_key = ask::ASK_HOTKEY.parse::<tauri_plugin_global_shortcut::Shortcut>().ok();
+                        if ask_key.is_some_and(|k| k.id() == shortcut.id()) {
+                            ask::on_hotkey(app);
+                            return;
+                        }
                         if let Some(w) = window::widget(app) {
                             let _ = w.show();
                             let _ = w.set_focus();
@@ -822,6 +830,16 @@ pub fn run() {
             dispatch::start_dictation,
             dispatch::run_queued,
             agents::set_agent_status,
+            ask::ask_context,
+            ask::ask_forget,
+            ask::ask_start,
+            ask::ask_cancel,
+            ask::ask_paste_back,
+            ask::ask_copy,
+            ask::ask_run,
+            ask::ask_open_in,
+            ask::ask_points,
+            ask::ask_hide_points,
             agents::answer_approval,
             agents::verify_task,
             agents::verify_output,
@@ -865,6 +883,10 @@ pub fn run() {
             if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
                 eprintln!("hotkey {hotkey} unavailable: {e}");
             }
+            if let Err(e) = app.global_shortcut().register(ask::ASK_HOTKEY) {
+                eprintln!("hotkey {} unavailable: {e}", ask::ASK_HOTKEY);
+            }
+            capture::spawn_clipboard_clock();
             if let Err(e) = app.global_shortcut().register(DISPATCH_HOTKEY) {
                 eprintln!("hotkey {DISPATCH_HOTKEY} unavailable: {e}");
             }

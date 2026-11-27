@@ -75,6 +75,15 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         <button onClick={onSetup} className="text-left text-[12px] text-fg underline-offset-2 hover:underline">Check setup and test the numbers →</button>
       </Section>
 
+      <Section title="Ask">
+        <Toggle label="Include a screenshot of the window you're in" on={s.ask_screenshots} set={(v) => update({ ...s, ask_screenshots: v })} />
+        <HistoryToggle />
+        <p className="text-[11px] leading-relaxed text-muted">
+          Press {navigator.userAgent.includes("Mac") ? "⌥⇧Space" : "Alt+Shift+Space"} anywhere. Answers come from Claude Code, Codex or Gemini on your own plan, whichever has room. Screenshots go only to that AI and are deleted after.
+          {navigator.userAgent.includes("Mac") ? " Needs Screen Recording and Accessibility permission for AI Usage Controller." : ""}
+        </p>
+      </Section>
+
       <Section title="Agents">
         <Toggle label="Agent status" on={s.agent_status} set={async (v) => {
           setSaveError("");
@@ -190,6 +199,12 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       {children}
     </label>
   );
+}
+
+function HistoryToggle() {
+  const read = () => { try { return localStorage.getItem("ask.history") === "1"; } catch { return false; } };
+  const [on, setOn] = useState(read);
+  return <Toggle label="Keep my last 20 asks on this computer" on={on} set={(v) => { try { localStorage.setItem("ask.history", v ? "1" : "0"); if (!v) localStorage.removeItem("ask.saved"); } catch { /* */ } setOn(v); }} />;
 }
 
 function Toggle({ label, on, set }: { label: string; on: boolean; set: (v: boolean) => void }) {

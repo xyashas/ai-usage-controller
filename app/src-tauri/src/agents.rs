@@ -22,6 +22,8 @@ use tauri::{AppHandle, State};
 pub fn hook_main() -> bool {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) != Some(st::HOOK_FLAG) { return false; }
+    // Our own Ask runs: not an agent, nothing to report or approve.
+    if std::env::var_os(crate::ask::ENV_FLAG).is_some() { return true; }
     let base = st::dir();
     match args.get(2).map(String::as_str) {
         Some("claude") => {

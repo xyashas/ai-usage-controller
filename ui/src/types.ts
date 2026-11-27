@@ -103,6 +103,7 @@ export interface Settings {
   agent_status: boolean;
   approvals: boolean;
   verify_done: boolean;
+  ask_screenshots: boolean;
   show_daily_recap: boolean;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
@@ -192,3 +193,16 @@ export interface WeeklyRecap {
   handoffs_count: number;
   total_limit_hits: number;
 }
+
+// ---------- Ask the notch ----------
+export type AskAction = "ask" | "explain" | "fix" | "find_bug" | "rewrite" | "shorter" | "professional" | "translate" | "reply" | "summarize" | "point";
+export type AskMode = "quick" | "deep";
+export interface AskPick { tool: Tool; reason: string }
+export interface AskContext {
+  window: string | null; app: string | null; selection: string | null; clipboard: string | null; clipboard_image: boolean;
+  screenshot: string | null; repo: string | null; pick: AskPick | null; installed: Tool[];
+}
+export interface AskTurn { question: string; answer: string }
+export interface AskPoint { x: number; y: number; label: string }
+export interface AskDone { id: string; tool: Tool | null; reason: string; error: string | null; points: AskPoint[]; text: string; opened_web: boolean }
+export interface AskRequest { id: string; question: string; action: AskAction; mode: AskMode; tool: Tool | null; history: AskTurn[]; council: boolean }

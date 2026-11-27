@@ -1,5 +1,6 @@
 import type { View } from "../App";
-import { GearIcon, Logo, PulseIcon } from "./icons";
+import { api } from "../api";
+import { GearIcon, Logo, PulseIcon, SparkIcon } from "./icons";
 
 /** The panel's header: name, the Usage / Agents / Handoff switch, setup and settings. */
 export function TopBar({ tab, onView }: { tab: "panel" | "agents" | "handoffs"; onView: (v: View) => void }) {
@@ -14,6 +15,7 @@ export function TopBar({ tab, onView }: { tab: "panel" | "agents" | "handoffs"; 
         <button aria-pressed={tab === "agents"} onClick={() => onView("agents")}>Agents</button>
         <button aria-pressed={tab === "handoffs"} onClick={() => onView("handoffs")}>Handoff</button>
       </div>
+      <button title={`Ask (${navigator.userAgent.includes("Mac") ? "⌥⇧Space" : "Alt+Shift+Space"})`} aria-label="Ask" className="icon-btn" onClick={() => api.askForget("all").finally(() => onView("ask"))}><SparkIcon /></button>
       <button title="Check setup" aria-label="Check setup" className="icon-btn" onClick={() => onView("setup")}><PulseIcon /></button>
       <button title="Settings" aria-label="Settings" className="icon-btn" onClick={() => onView("settings")}><GearIcon /></button>
     </header>

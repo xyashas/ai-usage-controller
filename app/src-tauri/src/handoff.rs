@@ -208,6 +208,22 @@ end run"#;
     Ok(started)
 }
 
+/// A plain shell in `cwd`, for "Run" in Ask (the command is pasted in after).
+pub fn open_shell(cwd: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    let ok = {
+        use std::os::windows::process::CommandExt;
+        let ps = powershell()?;
+        handoff::executable("wt").is_some_and(|wt| Command::new(wt).args(["-w", "new", "-d"]).arg(cwd).arg(&ps).arg("-NoLogo").spawn().is_ok())
+            || Command::new(ps).creation_flags(0x00000010).current_dir(cwd).arg("-NoLogo").spawn().is_ok()
+    };
+    #[cfg(target_os = "macos")]
+    let ok = Command::new("/usr/bin/open").args(["-a", "Terminal"]).arg(cwd).status().is_ok_and(|s| s.success());
+    #[cfg(target_os = "linux")]
+    let ok = ["x-terminal-emulator", "xterm"].iter().any(|t| Command::new(t).current_dir(cwd).spawn().is_ok());
+    if ok { Ok(()) } else { Err("Couldn't open a terminal.".into()) }
+}
+
 /// After opening an app or page: paste and send the prompt when its window is
 /// in front. Returns what to tell the user, and whether it was sent.
 fn auto_deliver(target: Tool, dest: Dest, opened_label: &str) -> (String, bool) {

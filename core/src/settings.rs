@@ -83,6 +83,8 @@ pub struct Settings {
     pub verify_done: bool,
     /// Show the daily morning brief card at the top of Usage each day.
     pub show_daily_recap: bool,
+    /// Ask the notch: include a screenshot of the window you're in.
+    pub ask_screenshots: bool,
 }
 
 impl Default for Settings {
@@ -108,6 +110,7 @@ impl Default for Settings {
             agent_status: false,
             approvals: true,
             verify_done: true,
+            ask_screenshots: true,
             show_daily_recap: true,
         }
     }

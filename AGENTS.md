@@ -322,6 +322,37 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    the tool shows >5% room: terminal at once, app/web only after 20 s without
    keyboard/mouse input (`autosend::idle_secs`) since they're pasted in. Each row
    offers Send now / Move to <roomiest tool> (`run_queued`).
+1j. **Ask the notch** (Claude: `core/src/ask.rs`, `app/src-tauri/src/{ask,capture}.rs`,
+   `ui/src/components/{AskView,Markdown,Pointer}.tsx`). Alt+Shift+Space anywhere
+   (or the ✦ button): before the widget takes focus, `capture::capture` records the
+   front window (HWND / app name), a screenshot of the focused window via `xcap`
+   (Win/mac only; scaled to ≤1600 px, temp PNG in `<data>/ask-tmp`, wiped on the
+   next ask), the selected text (waits for the hotkey's modifiers to be released,
+   sends Ctrl/Cmd+C, reads it, then restores your clipboard) and the clipboard if it
+   changed in the last 2 min (a background clock keeps only a sequence number/hash).
+   `ask::pick` chooses the installed CLI with most room (a pinned tool wins unless
+   ≥98%); `ask::command` runs it headless and read-only: `claude -p --output-format
+   stream-json --include-partial-messages --model haiku|opus` (only Read allowed),
+   `codex exec --json --sandbox read-only -c model_reasoning_effort=low|high [-i shot] -`,
+   `gemini -p "@shot …"` (+ `-m gemini-2.5-flash` for Quick); the prompt goes on
+   stdin, `StreamReader` turns each CLI's output into text deltas (`ask-delta` /
+   `ask-done` events). Child processes get `AIUC_ASK=1` so our agent hooks ignore
+   them. Questions about limits/agents/tests get `ask::work_brief` (snapshot +
+   failed test tails). No CLI at all → opens the web app with the question pasted.
+   **Council**: every installed tool answers in parallel (`<id>:<tool>`), then the
+   roomiest combines them (Agree / Differ / Best answer). **Pointing**: "where do I…"
+   with a screenshot asks for `<point x y label/>` markers; `parse_points` maps them
+   to fractions of the captured window and a click-through `pointer` webview window
+   (`index.html?overlay=pointer`) draws rings there for 20 s. Unverified: marker
+   accuracy per model. **Actions**: Replace / Paste reply (refocus the original
+   window, Ctrl/Cmd+V), Copy, Run in terminal (new shell in the repo, command pasted
+   not run), Fix it with an agent / Make it a task (prefills the Agents box), Open in
+   the tool's app or web, Listen (Web Speech). "Tell me when…/Remind me…" questions
+   go to Gemini's watchers (`add_watch`). History is off by default; the opt-in keeps
+   the last 20 Q&A in the webview's localStorage. macOS needs Screen Recording and
+   Accessibility permission. Gemini (branch `gemini/polish-watch-suggest`) builds
+   prompt polish, watchers and suggestion chips against the contract in its prompt;
+   Claude wires `polish_prompt` and the watch tick after merging.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).

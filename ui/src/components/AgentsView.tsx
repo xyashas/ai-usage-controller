@@ -132,7 +132,7 @@ function StatusSetup({ onDone }: { onDone: () => void }) {
 
 type RunItem = { text: string; tool: Tool; dest: DestOption; queue: boolean };
 
-export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: (v: View) => void; refresh: () => void }) {
+export function AgentsView({ snap, onView, refresh, prefill, onPrefilled }: { snap: Snapshot; onView: (v: View) => void; refresh: () => void; prefill?: string | null; onPrefilled?: () => void }) {
   const [repos, setRepos] = useState<RepoStatus[] | null>(null);
   const [repo, setRepo] = useState("");
   const [text, setText] = useState("");
@@ -149,6 +149,9 @@ export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: 
   const [result, setResult] = useState<Started[] | null>(null);
   const [err, setErr] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+
+  // Text handed over from Ask ("Fix it with an agent", "Make it a task").
+  useEffect(() => { if (prefill) { setText(prefill); onPrefilled?.(); } }, [prefill]);
 
   const loadRepos = () => api.listRepos(false).then((r) => { setRepos(r); setRepo((cur) => cur || r[0]?.id || ""); }, () => setRepos([]));
   useEffect(() => {

@@ -12,6 +12,7 @@
 
 pub mod advice;
 pub mod agent_status;
+pub mod ask;
 pub mod dispatch;
 pub mod engine;
 pub mod github;

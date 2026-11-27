@@ -3,6 +3,7 @@ import { HandoffPreview, type Draft } from "./components/HandoffPreview";
 import type { HandoffOffer, RepoStatus, Tool, Snapshot } from "./types";
 import { HandoffHub } from "./components/HandoffHub";
 import { AgentsView } from "./components/AgentsView";
+import { AskView } from "./components/AskView";
 import { api, inTauri, onHover, onOpenView, onSnapshot, onToggle } from "./api";
 import { Collapsed } from "./components/Collapsed";
 import { Expanded } from "./components/Expanded";
@@ -12,7 +13,7 @@ import { SettingsView } from "./components/SettingsView";
 import { Onboarding } from "./components/Onboarding";
 import { CheckSetup } from "./components/CheckSetup";
 
-export type View = "panel" | "agents" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
+export type View = "panel" | "ask" | "agents" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
 type Platform = "macos" | "windows" | "linux";
 
 const PANEL_W = 520;
@@ -36,6 +37,10 @@ export default function App() {
   const [platform, setPlatform] = useState<Platform>("windows");
   const [notch, setNotch] = useState(0);
   const [contentH, setContentH] = useState(320);
+  // Text handed to the Agents task box (from Ask), and an ask started elsewhere.
+  const [prefill, setPrefill] = useState<string | null>(null);
+  const [askInit, setAskInit] = useState<{ text: string; action: string } | null>(null);
+  const [askKey, setAskKey] = useState(0);
 
   const openRef = useRef(false);
   const hoverRef = useRef(false); // cursor is over the widget's shape
@@ -93,6 +98,8 @@ export default function App() {
       onHover(onHoverChange),
       onToggle(() => { clearTimeout(hoverTimer.current); setOpen(!openRef.current); }),
       onOpenView((v) => {
+        // Each hotkey press is a fresh ask with what's on screen now.
+        if (v === "ask") { setAskInit(null); setAskKey((k) => k + 1); }
         setView(v as View);
         setOpen(true);
       }),
@@ -112,11 +119,23 @@ export default function App() {
         requestAnimationFrame(() => surfaceRef.current?.querySelector<HTMLButtonElement>(".pill-layer button")?.focus({ preventScroll: true }));
       }
     };
+    // Suggestion chips (and anything else) can start an ask.
+    const onAskEvent = (e: Event) => {
+      const d = (e as CustomEvent<{ text?: string; action?: string }>).detail ?? {};
+      if (d.action === "handoff") { setView("handoffs"); setOpen(true); return; }
+      if (d.action === "send_failure") { setPrefill(`Fix the failing tests:\n\n${d.text ?? ""}`); setView("agents"); setOpen(true); return; }
+      setAskInit({ text: d.text ?? "", action: d.action ?? "ask" });
+      setAskKey((k) => k + 1);
+      setView("ask");
+      setOpen(true);
+    };
+    window.addEventListener("aiuc-ask", onAskEvent);
     window.addEventListener("blur", onBlur);
     window.addEventListener("keydown", onKey);
     return () => {
       subs.forEach((p) => p.then((u) => u()));
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("aiuc-ask", onAskEvent);
       window.removeEventListener("keydown", onKey);
     };
   }, [refresh, onHoverChange, setOpen]);
@@ -241,8 +260,10 @@ export default function App() {
             <div ref={innerRef} style={{ paddingTop: mac ? notch : 0 }}>
             {view === "handoff" && draft ? (
               <HandoffPreview draft={draft} onBack={() => { setDraft(null); setView(backTo.current === "handoff" ? "panel" : backTo.current); }} />
+            ) : view === "ask" ? (
+              <AskView key={askKey} init={askInit} onView={goto} onTask={(t) => { setPrefill(t); goto("agents"); }} />
             ) : view === "agents" ? (
-              <AgentsView snap={snap} onView={goto} refresh={refresh} />
+              <AgentsView snap={snap} onView={goto} refresh={refresh} prefill={prefill} onPrefilled={() => setPrefill(null)} />
             ) : view === "handoffs" ? (
               <HandoffHub onView={goto} onHandoff={(offer, target) => preview(offer, target, true)} onRepoHandoff={previewRepo} />
             ) : view === "onboarding" ? (
