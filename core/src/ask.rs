@@ -340,6 +340,42 @@ impl StreamReader {
     }
 }
 
+// ---------- when a tool can't answer ----------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Failure {
+    /// Not signed in / no API key.
+    SignedOut,
+    /// Out of its limit or rate-limited.
+    OutOfRoom,
+    Other,
+}
+
+/// What kind of failure a CLI's error is, so another tool can step in.
+pub fn classify(error: &str) -> Failure {
+    let e = error.to_lowercase();
+    if ["api key", "api_key", "apikey", "not logged in", "log in", "login", "sign in", "auth", "credential", "unauthorized", "401", "403"].iter().any(|w| e.contains(w)) {
+        Failure::SignedOut
+    } else if ["usage limit", "rate limit", "quota", "429", "limit reached", "too many requests", "exceeded"].iter().any(|w| e.contains(w)) {
+        Failure::OutOfRoom
+    } else {
+        Failure::Other
+    }
+}
+
+/// A plain sentence for the user, with the fix.
+pub fn explain_failure(tool: Tool, f: Failure) -> String {
+    let name = tool_label(tool);
+    match (tool, f) {
+        (Tool::Gemini, Failure::SignedOut) => "Gemini isn't signed in. Run `gemini` in a terminal once and choose Login with Google.".into(),
+        (Tool::ClaudeCode, Failure::SignedOut) => "Claude Code isn't signed in. Run `claude` in a terminal once and log in.".into(),
+        (Tool::Codex, Failure::SignedOut) => "Codex isn't signed in. Run `codex` in a terminal once and sign in with ChatGPT.".into(),
+        (_, Failure::OutOfRoom) => format!("{name} is out of room right now."),
+        (_, Failure::Other) => format!("{name} couldn't answer."),
+    }
+}
+
 // ---------- Council ----------
 
 /// The combined answer: where they agree, where they differ, the best answer.

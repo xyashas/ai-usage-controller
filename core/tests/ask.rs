@@ -98,3 +98,14 @@ fn points_and_code_are_pulled_out_of_answers() {
     assert_eq!(ask::first_code_block("no code"), None);
     assert!(ask::council_prompt("q", &[(Tool::Codex, "a".into())]).contains("<answer from=\"Codex\">"));
 }
+
+#[test]
+fn failures_are_classified_so_another_tool_can_answer() {
+    use ask::Failure;
+    assert_eq!(ask::classify("When using Gemini API, you must specify the GEMINI_API_KEY environment variable."), Failure::SignedOut);
+    assert_eq!(ask::classify("Please run /login"), Failure::SignedOut);
+    assert_eq!(ask::classify("Claude AI usage limit reached|1700000000"), Failure::OutOfRoom);
+    assert_eq!(ask::classify("429 Too Many Requests"), Failure::OutOfRoom);
+    assert_eq!(ask::classify("segfault"), Failure::Other);
+    assert!(ask::explain_failure(Tool::Gemini, Failure::SignedOut).contains("Login with Google"));
+}

@@ -62,13 +62,28 @@ fn current_repo(state: &AppState) -> Option<String> {
     eng.recent_projects(chrono::Utc::now()).ok()?.into_iter().find(|p| p.join(".git").exists()).map(|p| p.to_string_lossy().into_owned())
 }
 
+/// Tools that just failed for a reason that won't fix itself in seconds (not
+/// signed in, out of room): skipped for 10 minutes.
+fn broken() -> &'static Mutex<HashMap<Tool, std::time::Instant>> {
+    static B: OnceLock<Mutex<HashMap<Tool, std::time::Instant>>> = OnceLock::new();
+    B.get_or_init(Default::default)
+}
+
+fn mark_broken(tool: Tool) {
+    if let Ok(mut b) = broken().lock() { b.insert(tool, std::time::Instant::now()); }
+}
+
+fn is_broken(tool: Tool) -> bool {
+    broken().lock().ok().and_then(|b| b.get(&tool).copied()).is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(600))
+}
+
 fn rooms(state: &AppState) -> Vec<Room> {
     let snap = state.last.lock().ok().and_then(|l| l.clone());
     Tool::ALL.into_iter().map(|tool| {
         let status = snap.as_ref().and_then(|s| s.tools.iter().find(|t| t.tool == tool));
         Room {
             tool,
-            installed: aiuc_core::handoff::cli(tool).is_some() && status.is_none_or(|s| s.enabled),
+            installed: aiuc_core::handoff::cli(tool).is_some() && status.is_none_or(|s| s.enabled) && !is_broken(tool),
             used_pct: status.and_then(|s| s.headroom_pct).map(|h| 100.0 - h),
         }
     }).collect()
@@ -241,10 +256,27 @@ pub fn ask_start(app: AppHandle, state: State<AppState>, req: AskRequest) -> Cmd
             council(&app, &req, &rooms, &prompt, image.as_deref());
             return;
         }
-        let (answer, error) = run_one(&app, &req.id, pick.tool, req.mode, &prompt, image.as_deref());
+        // If a tool can't answer (not signed in, out of room), the next one with room tries.
+        let mut rooms = rooms;
+        let mut pick = pick;
+        let mut skipped: Vec<String> = vec![];
+        let (answer, error) = loop {
+            let (answer, error) = run_one(&app, &req.id, pick.tool, req.mode, &prompt, image.as_deref());
+            let Some(e) = error.as_deref() else { break (answer, error) };
+            if !answer.trim().is_empty() || e == "Stopped." { break (answer, error); }
+            let failure = ask::classify(e);
+            if failure != ask::Failure::Other { mark_broken(pick.tool); }
+            skipped.push(ask::explain_failure(pick.tool, failure));
+            if let Some(r) = rooms.iter_mut().find(|r| r.tool == pick.tool) { r.installed = false; }
+            match ask::pick(&rooms, None) {
+                Some(next) => pick = next,
+                None => break (answer, Some(if failure == ask::Failure::Other { e.to_owned() } else { skipped.join(" ") })),
+            }
+        };
+        let reason = if skipped.is_empty() { pick.reason.clone() } else { skipped.join(" ") };
         let (points, text) = if action == Action::Point { ask::parse_points(&answer) } else { (vec![], answer.trim().to_owned()) };
         if !points.is_empty() { if let Some(s) = shot { show_points(&app, s, &points); } }
-        let _ = app.emit("ask-done", Done { id: req.id.clone(), tool: Some(pick.tool), reason: pick.reason, error, points, text, opened_web: false });
+        let _ = app.emit("ask-done", Done { id: req.id.clone(), tool: Some(pick.tool), reason, error, points, text, opened_web: false });
     });
     Ok(())
 }
