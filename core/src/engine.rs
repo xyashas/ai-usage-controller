@@ -609,6 +609,7 @@ impl Engine {
         let savings: f64 = self.store.savings_since(metrics::month_start_local(now))?.iter().map(|s| s.amount_usd).sum();
 
         let mut snap = Snapshot {
+            gauge_history: vec![],
             idle_hidden: self.settings.onboarded && self.settings.hide_when_idle
                 && !recent_by_tool.values().flatten().any(|e| e.ts > now - Duration::minutes(30))
                 && !self.store.kv_get("web_activity")?.and_then(|s| s.parse::<i64>().ok())
@@ -630,6 +631,27 @@ impl Engine {
         };
         if !ent.paid() {
             self.apply_free_limits(&mut snap);
+        }
+        if let Some(tool) = snap.tools.iter().find(|t| Some(t.tool) == snap.active_tool && t.enabled && !t.locked) {
+            let binding = tool.windows.iter().filter(|w| w.source != Source::Learning)
+                .min_by(|a, b| a.headroom_pct.total_cmp(&b.headroom_pct));
+            if let Some(w) = binding {
+                let samples = self.store.gauges(tool.tool, &w.key, now - Duration::hours(24), now + Duration::milliseconds(1))?;
+                for g in samples {
+                    let point = crate::snapshot::GaugePoint {
+                        at: g.ts.timestamp_millis(), used: g.used_pct,
+                        reset_at: g.resets_at.map(|t| t.timestamp_millis()),
+                    };
+                    // One observation per five-minute bucket, preserving window boundaries.
+                    if let Some(last) = snap.gauge_history.last_mut() {
+                        if last.at / 300_000 == point.at / 300_000 && last.reset_at == point.reset_at {
+                            *last = point;
+                            continue;
+                        }
+                    }
+                    snap.gauge_history.push(point);
+                }
+            }
         }
         Ok(snap)
     }

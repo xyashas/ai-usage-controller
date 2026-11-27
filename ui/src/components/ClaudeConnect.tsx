@@ -36,28 +36,28 @@ export function ClaudeConnect({ tool, onChanged, compact = false }: { tool?: Too
   }
 
   return (
-    <div className={`space-y-2.5 rounded-2xl bg-white/[0.04] ring-1 ring-white/[0.07] ${compact ? "p-3" : "p-3.5"}`}>
+    <div className={`space-y-2 rounded-2xl bg-fg/[0.04] ring-1 ring-fg/[0.07] ${compact ? "p-3" : "p-4"}`}>
       {!compact && (
         <div className="space-y-1">
-          <p className="text-[13px] font-medium">{expired ? "Reconnect your Claude account" : "See your real Claude limits"}</p>
-          <p className="text-[11.5px] leading-relaxed text-white/50">
+          <p className="text-[13px] font-medium">{expired ? "Reconnect your Claude account" : "Connect for live Claude usage"}</p>
+          <p className="text-[11.5px] leading-relaxed text-muted">
             {expired
               ? "Your claude.ai session has expired."
-              : "Sign in to claude.ai once. The widget then shows the same 5-hour and weekly numbers as claude.ai, including chats in the browser and the desktop app."}
+              : "Sign in once to see how much of your 5-hour and weekly limits you’ve used across Claude."}
           </p>
         </div>
       )}
       {waiting ? (
-        <p className="text-[12px] text-white/70">Finish signing in in the Claude window. This panel updates within a minute.</p>
+        <p className="text-[12px] text-muted">Finish signing in in the Claude window. This panel updates within a minute.</p>
       ) : (
-        <button onClick={connect} className="w-full rounded-full bg-white py-2 text-[12.5px] font-semibold text-black hover:bg-white/90">
+        <button onClick={connect} className="w-full rounded-full bg-fg py-2 text-[12.5px] font-semibold text-canvas hover:bg-fg/90">
           {expired ? "Reconnect" : "Connect Claude account"}
         </button>
       )}
       {showKey ? (
-        <div className="space-y-1.5">
-          <p className="text-[11px] leading-relaxed text-white/45">
-            In your browser on claude.ai, open developer tools → Application → Cookies → claude.ai, and copy the value of <span className="font-mono text-white/70">sessionKey</span>.
+        <div className="space-y-2">
+          <p className="text-[11px] leading-relaxed text-muted">
+            In your browser on claude.ai, open developer tools → Application → Cookies → claude.ai, and copy the value of <span className="font-mono text-muted">sessionKey</span>.
           </p>
           <div className="flex gap-1.5">
             <input
@@ -65,15 +65,15 @@ export function ClaudeConnect({ tool, onChanged, compact = false }: { tool?: Too
               onFocus={() => api.focus()}
               onChange={(e) => setKey(e.target.value)}
               placeholder="sk-ant-sid…"
-              className="min-w-0 flex-1 rounded-full bg-black/60 px-3 py-1.5 font-mono text-[11.5px] outline-none ring-1 ring-white/10 focus:ring-accent"
+              className="min-w-0 flex-1 rounded-full bg-canvas/60 px-3 py-1.5 font-mono text-[11.5px] outline-none ring-1 ring-fg/10 focus:ring-accent"
             />
-            <button disabled={!key.trim()} onClick={useKey} className="rounded-full bg-white/10 px-3 text-[12px] font-medium disabled:opacity-40">
+            <button disabled={!key.trim()} onClick={useKey} className="rounded-full bg-fg/10 px-3 text-[12px] font-medium disabled:opacity-40">
               Use
             </button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setShowKey(true)} className="block text-left text-[11px] text-white/40 hover:text-white/70">
+        <button onClick={() => setShowKey(true)} className="block text-left text-[11px] text-muted hover:text-muted">
           Sign-in window not working? Paste a session key instead
         </button>
       )}

@@ -1,3 +1,4 @@
+import { ToolMark } from "./ToolMark";
 import { useEffect, useState } from "react";
 import type { Plan, Settings, Snapshot, Tool } from "../types";
 import { api } from "../api";
@@ -48,10 +49,10 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
   }
 
   return (
-    <div className="flex flex-col gap-3.5 p-5">
+    <div className="flex flex-col gap-4 p-4">
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-1 text-[12px] text-white/50 hover:text-white"><BackIcon /> Back</button>
-        <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-wider text-white/50">{snap.entitlements.tier}</span>
+        <button onClick={onBack} className="flex items-center gap-1 text-[12px] text-muted hover:text-fg"><BackIcon /> Back</button>
+        <span className="rounded-full bg-fg/[0.06] px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-wider text-muted">{snap.entitlements.tier}</span>
       </div>
 
       <Section title="Claude account">
@@ -60,15 +61,15 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
             <span className="text-ok">Connected to claude.ai</span>
             <button
               onClick={async () => { await api.disconnectClaude(); setS(await api.settings()); }}
-              className="text-white/45 hover:text-white"
+              className="text-muted hover:text-fg"
             >
               Disconnect
             </button>
           </div>
         ) : (
           <div className="space-y-2">
-            <p className="text-[11.5px] leading-relaxed text-white/50">Shows the same plan limits as claude.ai. Needed if you use claude.ai or the Claude desktop app.</p>
-            <button onClick={() => api.connectClaude()} className="w-full rounded-full bg-white py-1.5 text-[12.5px] font-semibold text-black hover:bg-white/90">Connect Claude account</button>
+            <p className="text-[11.5px] leading-relaxed text-muted">Shows the same plan limits as claude.ai. Needed if you use claude.ai or the Claude desktop app.</p>
+            <button onClick={() => api.connectClaude()} className="w-full rounded-full bg-fg py-1.5 text-[12.5px] font-semibold text-canvas hover:bg-fg/90">Connect Claude account</button>
           </div>
         )}
         <button onClick={onSetup} className="text-left text-[12px] text-accent hover:underline">Check setup and test the numbers →</button>
@@ -77,18 +78,18 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
       <Section title="Tools & plans">
         {TOOLS.map(({ tool: t, label }) => (
           <div key={t} className="flex items-center gap-2">
-            <input onFocus={() => api.focus()} type="checkbox" checked={s.tools[t].enabled} onChange={(e) => tool(t, { enabled: e.target.checked })} />
-            <span className="w-24 text-[13px]">{label}</span>
-            <select value={s.tools[t].plan_id ?? ""} onChange={(e) => tool(t, { plan_id: e.target.value || null })} className="min-w-0 flex-1 rounded-md bg-white/[0.06] px-2 py-1 text-[12px] ring-1 ring-white/[0.08]">
+            <input aria-label={`Track ${label}`} onFocus={() => api.focus()} type="checkbox" checked={s.tools[t].enabled} onChange={(e) => tool(t, { enabled: e.target.checked })} />
+            <span className="flex w-24 items-center gap-2 text-[13px]"><ToolMark tool={t} />{label}</span>
+            <select aria-label={`${label} plan`} value={s.tools[t].plan_id ?? ""} onChange={(e) => tool(t, { plan_id: e.target.value || null })} className="min-w-0 flex-1 rounded-md bg-fg/[0.06] px-2 py-1 text-[12px] ring-1 ring-fg/[0.08]">
               <option value="">Not sure</option>
               {plans[t].map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
         ))}
         {!paid && (
-          <label className="flex items-center gap-2 text-[12px] text-white/50">
+          <label className="flex items-center gap-2 text-[12px] text-muted">
             Free tracks one tool:
-            <select value={s.primary_tool ?? ""} onChange={(e) => update({ ...s, primary_tool: (e.target.value || null) as Tool | null })} className="rounded-md bg-white/[0.06] px-2 py-1 ring-1 ring-white/[0.08]">
+            <select value={s.primary_tool ?? ""} onChange={(e) => update({ ...s, primary_tool: (e.target.value || null) as Tool | null })} className="rounded-md bg-fg/[0.06] px-2 py-1 ring-1 ring-fg/[0.08]">
               {TOOLS.map((t) => <option key={t.tool} value={t.tool}>{t.label}</option>)}
             </select>
           </label>
@@ -97,10 +98,10 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
 
       <Section title="Alerts">
         <Row label="Amber warning at % used">
-          <input onFocus={() => api.focus()} type="number" min={10} max={99} disabled={!paid} value={100 - s.alerts.amber_pct} onChange={(e) => update({ ...s, alerts: { ...s.alerts, amber_pct: 100 - Number(e.target.value) } })} className="w-16 rounded-md bg-white/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-white/[0.08] disabled:opacity-40" />
+          <input onFocus={() => api.focus()} type="number" min={10} max={99} disabled={!paid} value={100 - s.alerts.amber_pct} onChange={(e) => update({ ...s, alerts: { ...s.alerts, amber_pct: 100 - Number(e.target.value) } })} className="w-16 rounded-md bg-fg/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-fg/[0.08] disabled:opacity-40" />
         </Row>
         <Row label="Red warning at % used">
-          <input onFocus={() => api.focus()} type="number" min={50} max={99} disabled={!paid} value={100 - s.alerts.red_pct} onChange={(e) => update({ ...s, alerts: { ...s.alerts, red_pct: 100 - Number(e.target.value) } })} className="w-16 rounded-md bg-white/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-white/[0.08] disabled:opacity-40" />
+          <input onFocus={() => api.focus()} type="number" min={50} max={99} disabled={!paid} value={100 - s.alerts.red_pct} onChange={(e) => update({ ...s, alerts: { ...s.alerts, red_pct: 100 - Number(e.target.value) } })} className="w-16 rounded-md bg-fg/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-fg/[0.08] disabled:opacity-40" />
         </Row>
         <Toggle label="Runaway-loop alerts" on={s.alerts.runaway_alerts} set={(v) => update({ ...s, alerts: { ...s.alerts, runaway_alerts: v } })} />
         <Toggle label="One-click Stop (beta)" on={s.alerts.one_click_stop} set={(v) => update({ ...s, alerts: { ...s.alerts, one_click_stop: v } })} />
@@ -115,41 +116,41 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
         {saveError && <p role="alert" className="text-xs text-bad">{saveError}</p>}
 
         <Row label="Open panel">
-          <input onFocus={() => api.focus()} value={s.hotkey} onChange={(e) => update({ ...s, hotkey: e.target.value })} className="w-28 rounded-md bg-white/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-white/[0.08]" />
+          <input onFocus={() => api.focus()} value={s.hotkey} onChange={(e) => update({ ...s, hotkey: e.target.value })} className="w-28 rounded-md bg-fg/[0.06] px-2 py-1 text-right text-[12px] ring-1 ring-fg/[0.08]" />
         </Row>
       </Section>
 
       <Section title="Sync & team">
-        <p className="text-[11.5px] text-white/50">Only token counts, timestamps and model names are sent. Never prompts, code or file names.</p>
+        <p className="text-[11.5px] text-muted">Only token counts, timestamps and model names are sent. Never prompts, code or file names.</p>
         {s.sync.enabled ? (
           <div className="flex items-center justify-between text-[12.5px]">
             <span className="text-ok">Syncing to {s.sync.server_url}</span>
-            <button onClick={() => update({ ...s, sync: { ...s.sync, enabled: false } })} className="text-white/50 hover:text-white">Turn off</button>
+            <button onClick={() => update({ ...s, sync: { ...s.sync, enabled: false } })} className="text-muted hover:text-fg">Turn off</button>
           </div>
         ) : (
-          <div className="space-y-1.5">
-            <input onFocus={() => api.focus()} placeholder="Server (https://api.aiusage.dev)" value={invite.server} onChange={(e) => setInvite({ ...invite, server: e.target.value })} className="w-full rounded-md bg-white/[0.06] px-2 py-1 text-[12px] ring-1 ring-white/[0.08]" />
+          <div className="space-y-2">
+            <input onFocus={() => api.focus()} placeholder="Server (https://api.aiusage.dev)" value={invite.server} onChange={(e) => setInvite({ ...invite, server: e.target.value })} className="w-full rounded-md bg-fg/[0.06] px-2 py-1 text-[12px] ring-1 ring-fg/[0.08]" />
             <div className="flex gap-1.5">
-              <input onFocus={() => api.focus()} placeholder="Invite code" value={invite.code} onChange={(e) => setInvite({ ...invite, code: e.target.value })} className="min-w-0 flex-1 rounded-md bg-white/[0.06] px-2 py-1 text-[12px] ring-1 ring-white/[0.08]" />
-              <input onFocus={() => api.focus()} placeholder="Your email" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} className="min-w-0 flex-1 rounded-md bg-white/[0.06] px-2 py-1 text-[12px] ring-1 ring-white/[0.08]" />
+              <input onFocus={() => api.focus()} placeholder="Invite code" value={invite.code} onChange={(e) => setInvite({ ...invite, code: e.target.value })} className="min-w-0 flex-1 rounded-md bg-fg/[0.06] px-2 py-1 text-[12px] ring-1 ring-fg/[0.08]" />
+              <input onFocus={() => api.focus()} placeholder="Your email" value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} className="min-w-0 flex-1 rounded-md bg-fg/[0.06] px-2 py-1 text-[12px] ring-1 ring-fg/[0.08]" />
             </div>
-            <button disabled={!invite.server || !invite.code} onClick={join} className="w-full rounded-md bg-white/10 py-1.5 text-[12px] disabled:opacity-40">Join team or sync group</button>
-            {syncMsg && <p className="text-[11.5px] text-white/50">{syncMsg}</p>}
+            <button disabled={!invite.server || !invite.code} onClick={join} className="w-full rounded-md bg-fg/10 py-1.5 text-[12px] disabled:opacity-40">Join team or sync group</button>
+            {syncMsg && <p className="text-[11.5px] text-muted">{syncMsg}</p>}
           </div>
         )}
       </Section>
 
       <Section title="Licence">
         {paid && snap.entitlements.tier !== "trial" ? (
-          <button onClick={async () => { await api.deactivate(); }} className="text-left text-[12px] text-white/50 hover:text-white">Deactivate on this device</button>
+          <button onClick={async () => { await api.deactivate(); }} className="text-left text-[12px] text-muted hover:text-fg">Deactivate on this device</button>
         ) : (
           <button onClick={onPaywall} className="text-left text-[12px] text-accent">Upgrade or enter a licence key →</button>
         )}
       </Section>
 
-      <div className="sticky bottom-0 -mx-5 -mb-5 mt-auto flex gap-2 bg-black px-5 pb-5 pt-3">
-        <button onClick={save} className="flex-1 rounded-full bg-white py-2 text-[13px] font-semibold text-black hover:bg-white/90">{saved ? "Saved ✓" : "Save"}</button>
-        <button onClick={() => api.quit()} className="rounded-full bg-white/[0.06] px-4 text-[12px] text-white/55 hover:text-white">Quit</button>
+      <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto flex gap-2 bg-canvas px-4 pb-4 pt-3">
+        <button onClick={save} className="flex-1 rounded-full bg-fg py-2 text-[13px] font-semibold text-canvas hover:bg-fg/90">{saved ? "Saved ✓" : "Save"}</button>
+        <button onClick={() => api.quit()} className="rounded-full bg-fg/[0.06] px-4 text-[12px] text-muted hover:text-fg">Quit</button>
       </div>
     </div>
   );
@@ -157,8 +158,8 @@ export function SettingsView({ snap, onBack, onPaywall, onSetup }: { snap: Snaps
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-2.5 border-t border-white/[0.06] pt-3 first-of-type:border-0 first-of-type:pt-0">
-      <h3 className="text-[10.5px] font-medium uppercase tracking-wider text-white/40">{title}</h3>
+    <section className="space-y-2 border-t border-fg/[0.06] pt-3 first-of-type:border-0 first-of-type:pt-0">
+      <h3 className="text-[10.5px] font-medium uppercase tracking-wider text-muted">{title}</h3>
       {children}
     </section>
   );
@@ -166,19 +167,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between text-[12.5px]">
+    <label className="flex items-center justify-between text-[12.5px]">
       <span>{label}</span>
       {children}
-    </div>
+    </label>
   );
 }
 
 function Toggle({ label, on, set }: { label: string; on: boolean; set: (v: boolean) => void }) {
   return (
-    <button onClick={() => set(!on)} className="flex w-full items-center justify-between text-[12.5px]">
+    <button role="switch" aria-checked={on} onClick={() => set(!on)} className="flex w-full items-center justify-between text-[12.5px]">
       <span>{label}</span>
-      <span className={`flex h-4 w-7 items-center rounded-full px-0.5 transition-colors duration-150 ${on ? "bg-accent" : "bg-white/15"}`}>
-        <span className={`h-3 w-3 rounded-full bg-white transition-transform duration-150 ${on ? "translate-x-3" : ""}`} />
+      <span className={`flex h-4 w-7 items-center rounded-full px-0.5 transition-colors duration-150 ${on ? "bg-accent" : "bg-fg/15"}`}>
+        <span className={`h-3 w-3 rounded-full bg-fg transition-transform duration-150 ${on ? "translate-x-3" : ""}`} />
       </span>
     </button>
   );

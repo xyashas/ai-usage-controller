@@ -1,6 +1,9 @@
 @import "tailwindcss";
 
 @theme {
+  --color-fg: #fafafa;
+  --color-muted: #b8bac6;
+  --color-canvas: #08090b;
   --color-ink: #0b0b0f;
   --color-panel: #141419;
   --color-line: #26262e;
@@ -19,18 +22,17 @@
   body.preview { background: linear-gradient(#3a3a46, #24242c); }
   button { cursor: pointer; }
   input[type="checkbox"] { accent-color: #8b8bff; }
-  select option { background: #141419; }
+  select option { background: var(--color-canvas); color: var(--color-fg); }
 }
 @utility tabular { font-variant-numeric: tabular-nums; }
 
-@keyframes pulse-red { 0%, 100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.0); } 50% { box-shadow: 0 0 14px 2px rgba(248,113,113,0.75); } }
-@keyframes glow-amber { 0%, 100% { box-shadow: 0 0 6px 0 rgba(251,191,36,0.35); } 50% { box-shadow: 0 0 10px 1px rgba(251,191,36,0.55); } }
-.pulse-red { animation: pulse-red 1.2s ease-in-out infinite; }
-.glow-amber { animation: glow-amber 2.4s ease-in-out infinite; }
+@keyframes pulse-red { 0%, 100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.0); } 50% { box-shadow: 0 0 14px 2px rgba(248,113,113,0.32); } }
+.pulse-red { animation: pulse-red 2.8s ease-in-out infinite; }
 /* The widget: one black surface that morphs between the pill and the panel. */
 .surface {
-  background: #000;
-  color: #f4f4f6;
+  background: var(--color-canvas);
+  color: var(--color-fg);
+  color-scheme: dark;
   transition:
     opacity 220ms ease,
     width 380ms cubic-bezier(0.32, 0.72, 0, 1),
@@ -49,3 +51,26 @@
 .fade-in { animation: fade-in 160ms ease-out; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .surface, .pill-layer, .panel-layer { transition: none !important; } }
+
+@media (prefers-color-scheme: light) {
+  .surface:not(.notch-pill) {
+    color-scheme: light;
+    --color-canvas: #fafafa;
+    --color-fg: #17181d;
+    --color-muted: #484954;
+    --color-mute: #484954;
+    --color-accent: #443293;
+    --color-ok: #115c42;
+    --color-bad: #9c2637;
+    --color-warn: #704500;
+  }
+  body.preview { background: linear-gradient(#dadbe2, #eff0f4); }
+}
+.surface.notch-pill { background: #000; }
+.surface :focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+.surface .panel-layer:focus { outline: none; }
+.surface :disabled { opacity: 1; cursor: default; }
+.surface input::placeholder { color: var(--color-muted); opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .surface, .surface * { transition: none !important; animation: none !important; }
+}

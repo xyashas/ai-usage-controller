@@ -62,7 +62,11 @@ export async function onHover(cb: (inside: boolean) => void): Promise<() => void
 }
 
 export async function onOpenView(cb: (v: string) => void): Promise<() => void> {
-  if (!inTauri) return () => {};
+  if (!inTauri) {
+    const preview = new URLSearchParams(location.search).get("view");
+    if (preview && ["panel", "settings", "setup", "audit", "paywall", "onboarding"].includes(preview)) cb(preview);
+    return () => {};
+  }
   const { listen } = await import("@tauri-apps/api/event");
   return listen<string>("open-view", (e) => cb(e.payload));
 }
@@ -93,7 +97,8 @@ let mockSettings: Settings = {
 const dismissed = new Set<string>();
 
 function mockSnapshot(): Snapshot {
-  const t = Date.now() / 1000;
+  const stamp = Date.now();
+  const t = stamp / 1000;
   const claudeLeft = mockScenario === "low" ? 14 : mockScenario === "critical" ? 4 : 38 - ((t / 20) % 6);
   const paid = mockTier !== "free";
   const tool = (tool: Tool, label: string, left: number, extra: Partial<Snapshot["tools"][0]> = {}): Snapshot["tools"][0] => ({
@@ -121,24 +126,32 @@ function mockSnapshot(): Snapshot {
       windows: [{ key: "daily", label: "Daily", used_pct: 9, headroom_pct: 91, resets_at: inMin(600), source: "estimate", used_usd: null, allowance_usd: null, used_requests: 134, allowance_requests: 1500 }],
     }),
   ];
+  if (mockScenario === "empty") tools.length = 0;
+  if (mockScenario === "learning" || mockScenario === "unconnected") {
+    Object.assign(tools[0], { today_requests: 0, headroom_pct: null, windows: [], minutes_left: null, source: "learning" });
+  }
   const alerts: Alert[] = [];
   if (mockScenario === "runaway" && paid)
     alerts.push({ id: "run:mock", level: "red", kind: "runaway", tool: "claude_code", message: "$4.20 in 6 min, possible loop. Stop?", action: { kind: "stop", label: "Stop", target_tool: null }, session_id: "s", project: "/dev/acme", burn_usd_per_min: 0.7 });
   if (claudeLeft <= 20)
     alerts.push({ id: `low:${claudeLeft <= 5 ? "red" : "amber"}`, level: claudeLeft <= 5 ? "red" : "amber", kind: "low_headroom", tool: "claude_code", message: `Claude 5-hour limit ${Math.round(100 - claudeLeft)}% used, about 20 min left at this pace`, action: paid ? { kind: "switch", label: "Switch to Codex", target_tool: "codex" } : { kind: "dismiss", label: "Dismiss", target_tool: null }, session_id: null, project: null, burn_usd_per_min: null });
   return {
+    gauge_history: ["empty", "learning", "unconnected"].includes(mockScenario) ? [] : Array.from({length: 97}, (_, i) => ({
+      at: stamp - (96 - i) * 900000, used: i === 96 ? 100 - claudeLeft : (i % 20) * 4,
+      reset_at: stamp + (Math.floor(i / 20) * 20 + 20 - 96) * 900000,
+    })),
     idle_hidden: mockSettings.hide_when_idle && mockScenario === "idle",
     generated_at: now().toISOString(),
     onboarded: mockSettings.onboarded,
     entitlements: { tier: mockTier, trial_ends_at: mockTier === "trial" ? inMin(60 * 24 * 5) : null, trial_available: mockTier === "free", licence_status: null, max_devices: 2 },
     active_tool: "claude_code",
     tools,
-    today: { cost_usd: 20.92, sessions: 7, top_session: paid ? { tool: "claude_code", session_id: "s", project_name: "acme-api", cost_usd: 9.8 } : null },
-    session_meter: paid ? { tool: "claude_code", session_id: "s", project_name: "acme-api", cost_usd: 3.62 + ((t / 3) % 10) * 0.02, started_at: inMin(-38), minutes: 38, burn_usd_per_min: 0.31 } : null,
+    today: { cost_usd: tools.length ? 20.92 : 0, sessions: 7, top_session: paid ? { tool: "claude_code", session_id: "s", project_name: "acme-api", cost_usd: 9.8 } : null },
+    session_meter: paid && tools.length ? { tool: "claude_code", session_id: "s", project_name: "acme-api", cost_usd: 3.62 + ((t / 3) % 10) * 0.02, started_at: inMin(-38), minutes: 38, burn_usd_per_min: 0.31 } : null,
     alerts: alerts.filter((a) => !dismissed.has(a.id)),
-    nudge: paid && !dismissed.has("nudge") ? { id: "n", tool: "claude_code", count: 340, from_label: "Opus", to_label: "Sonnet", to_model: "claude-sonnet-5-5", actual_usd: 20, alternative_usd: 8, saving_usd: 12, message: "You ran 340 small edits on Opus today. Sonnet would cost about $12 less." } : null,
+    nudge: tools.length && paid && !dismissed.has("nudge") ? { id: "n", tool: "claude_code", count: 340, from_label: "Opus", to_label: "Sonnet", to_model: "claude-sonnet-5-5", actual_usd: 20, alternative_usd: 8, saving_usd: 12, message: "You ran 340 small edits on Opus today. Sonnet would cost about $12 less." } : null,
     savings_month_usd: paid ? 212 : null,
-    audit: paid ? [{ tool: "claude_code", current_plan: "Claude Max 20x", current_price: 200, action: "downgrade", target_plan_id: "max5", target_plan: "Claude Max 5x", monthly_saving_usd: 100, peak_used_pct: 31, headline: "You used 31% of Claude Max 20x. Claude Max 5x saves you $100/month.", reasoning: ["Peak weekly use would have been 52% of Claude Max 5x (threshold: under 60% for 4 weeks)."] }] : [],
+    audit: tools.length && paid ? [{ tool: "claude_code", current_plan: "Claude Max 20x", current_price: 200, action: "downgrade", target_plan_id: "max5", target_plan: "Claude Max 5x", monthly_saving_usd: 100, peak_used_pct: 31, headline: "You used 31% of Claude Max 20x. Claude Max 5x saves you $100/month.", reasoning: ["Peak weekly use would have been 52% of Claude Max 5x (threshold: under 60% for 4 weeks)."] }] : [],
     projected_saving_usd: 112,
     locked: paid ? [] : ["time_to_cutoff", "switchboard", "runaway", "session_meter", "model_nudge", "plan_audit", "savings", "custom_alerts"],
     remote: null,
@@ -182,6 +195,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     case "alert_action": dismissed.add(args!.id as string); return "ok";
     case "start_trial": mockTier = "trial"; return null;
     case "activate_licence": mockTier = "pro"; return "pro";
+    case "layout": return { notch_height: Number(new URLSearchParams(location.search).get("notch")) || 0 };
     case "platform": return new URLSearchParams(location.search).get("platform") || (navigator.userAgent.includes("Windows") ? "windows" : "macos");
     case "connect_claude": mockSettings.claude_web = true; return null;
     case "disconnect_claude": mockSettings.claude_web = false; return null;

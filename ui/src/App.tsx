@@ -85,7 +85,7 @@ export default function App() {
     const subs = [
       onSnapshot(setSnap),
       onHover(onHoverChange),
-      onToggle(() => setOpen(!openRef.current)),
+      onToggle(() => { clearTimeout(hoverTimer.current); setOpen(!openRef.current); }),
       onOpenView((v) => {
         setView(v as View);
         setOpen(true);
@@ -100,7 +100,12 @@ export default function App() {
       clearTimeout(hoverTimer.current);
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        requestAnimationFrame(() => surfaceRef.current?.querySelector<HTMLButtonElement>(".pill-layer button")?.focus({ preventScroll: true }));
+      }
+    };
     window.addEventListener("blur", onBlur);
     window.addEventListener("keydown", onKey);
     return () => {
@@ -109,6 +114,15 @@ export default function App() {
       window.removeEventListener("keydown", onKey);
     };
   }, [refresh, onHoverChange, setOpen]);
+
+  useEffect(() => {
+    if (open && mounted) {
+      contentRef.current?.scrollTo(0, 0);
+      if (document.hasFocus() && document.activeElement?.matches("body, .pill-layer button")) {
+        contentRef.current?.focus({ preventScroll: true });
+      }
+    }
+  }, [open, view, mounted]);
 
   // First run: open straight into onboarding.
   useEffect(() => {
@@ -134,12 +148,16 @@ export default function App() {
   useLayoutEffect(() => {
     const el = innerRef.current;
     if (!mounted || !el) return;
-    const measure = () => setContentH(Math.min(MAX_H, Math.ceil(el.getBoundingClientRect().height)));
+    const measure = () => {
+      // Async views briefly have no content. Keep the previous surface until the new view is ready.
+      if (!el.firstElementChild) return;
+      setContentH(Math.min(MAX_H, Math.ceil(el.getBoundingClientRect().height)));
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [mounted]);
+  }, [mounted, view]);
 
   // Tell the native side which area takes the mouse (everything else clicks
   // through). Uses the shape's target size rather than measuring mid-animation,
@@ -175,16 +193,20 @@ export default function App() {
         ref={surfaceRef}
         onMouseEnter={inTauri ? undefined : () => onHoverChange(true)}
         onMouseLeave={inTauri ? undefined : () => onHoverChange(false)}
-        className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && alert ? (alert.level === "red" ? "pulse-red" : "glow-amber") : ""}`}
+        className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && alert?.level === "red" ? "pulse-red" : ""} ${!open && mac && notch ? "notch-pill" : ""}`}
         aria-hidden={hidden}
         inert={hidden}
         style={{ opacity: hidden ? 0 : 1, pointerEvents: hidden ? "none" : undefined, top: pill.top, width: open ? PANEL_W : pill.w, height, borderRadius: radius, transform: "translateX(-50%)" }}
       >
-        <div className="pill-layer absolute inset-x-0 bottom-0" style={{ height: mac && notch ? 22 : pill.h, opacity: open ? 0 : 1 }}>
-          <Collapsed snap={snap} onOpen={() => setOpen(true)} />
+        <div inert={open} className="pill-layer absolute inset-x-0 bottom-0" style={{ height: mac && notch ? 22 : pill.h, opacity: open ? 0 : 1 }}>
+          <Collapsed notch={mac && notch > 0} snap={snap} onOpen={() => setOpen(true)} />
         </div>
         {mounted && (
           <div
+            tabIndex={-1}
+            role="region"
+            aria-label={view === "panel" ? "Usage panel" : view}
+            inert={!open}
             ref={contentRef}
             className="panel-layer absolute left-0 top-0 overflow-y-auto"
             style={{ width: PANEL_W, maxHeight: MAX_H, opacity: open ? 1 : 0 }}
