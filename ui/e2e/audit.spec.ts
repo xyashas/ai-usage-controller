@@ -253,3 +253,58 @@ test.describe("Accessibility & 60fps panel-open performance", () => {
     expect(metrics.medianMs, `Median frame time ${metrics.medianMs.toFixed(2)}ms too slow`).toBeLessThan(25);
   });
 });
+
+test.describe("Voice & Ask regression flows", () => {
+  test("clipboard-only copied error offers Fix/Explain/Find the bug and answers cleanly", async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto("/?view=ask&scenario=copied", { waitUntil: "networkidle" });
+    await page.waitForTimeout(250);
+    await expect(page.getByText(/Copied:/)).toBeVisible();
+    const fixBtn = page.getByRole("button", { name: /^Fix$/i });
+    await expect(fixBtn).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Explain$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Find the bug$/i })).toBeVisible();
+    await fixBtn.click();
+    await page.waitForTimeout(700);
+    await expect(page.getByRole("button", { name: /New chat/i })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test("Ask conversation survives closing/reopening view and New chat clears it", async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.addInitScript(() => { localStorage.setItem("ask.tool", "gemini"); });
+    await page.goto("/?view=ask&scenario=normal", { waitUntil: "networkidle" });
+    await page.waitForTimeout(250);
+    // Stale gemini pin must be sanitized to Auto · Claude
+    await expect(page.getByRole("button", { name: /Auto · Claude/i })).toBeVisible();
+    const input = page.locator("textarea").first();
+    await input.fill("Keep this thread alive");
+    await input.press("Enter");
+    await page.waitForTimeout(700);
+    await expect(page.getByText("Keep this thread alive")).toBeVisible();
+    // Leave Ask -> panel -> return to Ask
+    await page.getByRole("button", { name: /^Back$/i }).click();
+    await page.waitForTimeout(200);
+    await page.getByRole("button", { name: /^Ask$/i }).first().click();
+    await page.waitForTimeout(250);
+    await expect(page.getByText("Keep this thread alive")).toBeVisible();
+    // New chat clears it
+    await page.getByRole("button", { name: /New chat/i }).click();
+    await page.waitForTimeout(150);
+    await expect(page.getByText("Keep this thread alive")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("Buddy starting and listening states show Mic starting and amber glow", async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto("/?overlay=buddy&buddy=starting", { waitUntil: "networkidle" });
+    await page.waitForTimeout(200);
+    await expect(page.getByText(/Mic starting/i)).toBeVisible();
+
+    await page.goto("/?overlay=buddy&buddy=listening", { waitUntil: "networkidle" });
+    await page.waitForTimeout(200);
+    await expect(page.locator(".buddy-glow")).toBeVisible();
+    await expect(page.getByText(/how do I turn off notifications/i)).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+});

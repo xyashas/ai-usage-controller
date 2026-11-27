@@ -404,10 +404,11 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
     case "run_dispatch": return (args!.tasks as { text: string; tool: Tool; dest: Dest; queue?: boolean }[]).map((t) => ({ ...t, branch: args!.worktrees && t.dest !== "web" && !t.queue ? "agents/x" : null, message: t.queue ? "Queued. Sends when Claude Code resets at 4:12 PM" : t.dest === "terminal" ? "Started in a terminal" : t.dest === "app" ? "Sent in the app" : "Sent in the browser", delivered: true, error: null }));
     case "ask_context": return {
       window: "checkout.ts — acme-web — Visual Studio Code", app: "Visual Studio Code",
-      selection: mockScenario === "empty" ? null : "TypeError: Cannot read properties of undefined (reading 'total')\n    at applyCoupon (src/checkout/total.ts:42:18)",
-      clipboard: null, clipboard_image: false,
-      screenshot: "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='100'><rect width='160' height='100' fill='%231e1e1e'/><rect x='0' y='0' width='34' height='100' fill='%23252526'/><rect x='44' y='14' width='90' height='6' rx='2' fill='%23569cd6'/><rect x='44' y='28' width='70' height='6' rx='2' fill='%239cdcfe'/><rect x='44' y='42' width='100' height='6' rx='2' fill='%23f44747'/></svg>",
-      repo: "acme-web", pick: { tool: (args!.pinned as Tool) ?? "codex", reason: args!.pinned ? "your pick" : "Claude is at 96%" }, installed: ["claude_code", "codex", "gemini"],
+      selection: mockScenario === "empty" || mockScenario === "copied" ? null : "TypeError: Cannot read properties of undefined (reading 'total')\n    at applyCoupon (src/checkout/total.ts:42:18)",
+      clipboard: mockScenario === "copied" ? "TypeError: Cannot read properties of undefined (reading 'total')\n    at applyCoupon (src/checkout/total.ts:42:18)" : null,
+      clipboard_image: false,
+      screenshot: mockScenario === "copied" ? null : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='100'><rect width='160' height='100' fill='%231e1e1e'/><rect x='0' y='0' width='34' height='100' fill='%23252526'/><rect x='44' y='14' width='90' height='6' rx='2' fill='%23569cd6'/><rect x='44' y='28' width='70' height='6' rx='2' fill='%239cdcfe'/><rect x='44' y='42' width='100' height='6' rx='2' fill='%23f44747'/></svg>",
+      repo: "acme-web", pick: { tool: (args!.pinned as Tool) ?? "claude_code", reason: args!.pinned ? "your pick" : "" }, installed: ["claude_code", "codex", "gemini"],
     };
     case "ask_start": {
       const req = args!.req as AskRequest;
