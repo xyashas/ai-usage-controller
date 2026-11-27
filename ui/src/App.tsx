@@ -12,9 +12,10 @@ import { AuditCard } from "./components/AuditCard";
 import { SettingsView } from "./components/SettingsView";
 import { Onboarding } from "./components/Onboarding";
 import { CheckSetup } from "./components/CheckSetup";
+import { Inbox } from "./components/Inbox";
 import { SuggestionChip } from "./components/SuggestionChip";
 
-export type View = "panel" | "ask" | "agents" | "handoffs" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
+export type View = "panel" | "ask" | "agents" | "handoffs" | "inbox" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
 type Platform = "macos" | "windows" | "linux";
 
 const PANEL_W = 520;
@@ -125,6 +126,7 @@ export default function App() {
       const d = (e as CustomEvent<{ text?: string; action?: string }>).detail ?? {};
       if (d.action === "handoff") { setView("handoffs"); setOpen(true); return; }
       if (d.action === "send_failure") { setPrefill(`Fix the failing tests:\n\n${d.text ?? ""}`); setView("agents"); setOpen(true); return; }
+      if (d.action === "make_task") { setPrefill(d.text ?? ""); setView("agents"); setOpen(true); return; }
       setAskInit({ text: d.text ?? "", action: d.action ?? "ask" });
       setAskKey((k) => k + 1);
       setView("ask");
@@ -267,6 +269,8 @@ export default function App() {
               <AgentsView snap={snap} onView={goto} refresh={refresh} prefill={prefill} onPrefilled={() => setPrefill(null)} />
             ) : view === "handoffs" ? (
               <HandoffHub onView={goto} onHandoff={(offer, target) => preview(offer, target, true)} onRepoHandoff={previewRepo} />
+            ) : view === "inbox" ? (
+              <Inbox onView={goto} onTask={(t) => { setPrefill(t); goto("agents"); }} />
             ) : view === "onboarding" ? (
               <Onboarding
                 onDone={async () => {
