@@ -261,6 +261,20 @@ Lemon Squeezy checkout URLs (`ui/.env`, `web/.env`), updater pubkey in
    `keybd_event`) or macOS `startDictation:`; nothing is recorded by the app.
    Next: approvals from the notch (Claude Code hooks), verified "done" (run tests
    when an agent goes idle), task queue at limit reset, morning brief, learned routing.
+1e. **Destinations everywhere + GitHub.** App detection on Windows uses
+   `Get-StartApps` (cached 5 min) and launches `explorer shell:AppsFolder\<AppID>`,
+   so Store installs work; Codex falls back to the **ChatGPT app** (Codex is in its
+   sidebar). Each dispatcher task has its own Open in (app / terminal / web), the
+   last choice per tool is remembered (`ui/src/prefs.ts`). Terminal tasks start
+   together; app/web tasks are copied and opened one at a time ("Copy & open next")
+   so each has the clipboard to itself. App/web prompts name the folder/branch or
+   GitHub repo. **GitHub** (`core/src/github.rs`): connect with the `gh` CLI login,
+   a pasted token, or device-flow "Sign in with GitHub" when the build sets
+   `AIUC_GITHUB_CLIENT_ID` (an OAuth app's client id; owner to create). Token in
+   the local kv store, sent only to api.github.com. Repos not cloned here appear as
+   `github:owner/name` (cloud tasks via web/app; Clone button clones with the token
+   and resets the remote to the plain URL). Task rows store `dest`; app/web tasks
+   show "Opened" until local logs show activity.
 2. **Audit from day one.** The scanner already reads 45 days of history; produce
    a plan recommendation on first launch instead of "come back in 4 weeks"
    (be explicit about confidence when history is short).

@@ -33,58 +33,78 @@ pub fn web_url(target: Tool) -> &'static str {
 enum AppLaunch {
     #[cfg_attr(target_os = "linux", allow(dead_code))]
     Path(PathBuf),
+    /// A Windows Start menu app id (works for Store and regular installs).
     #[cfg_attr(not(windows), allow(dead_code))]
-    Url(&'static str),
+    StartMenu(String),
 }
 
-/// The vendor's desktop app, if installed. Claude Code lives in the Claude
-/// app's Code tab; Codex has its own app; Gemini has none for coding.
-fn find_app(target: Tool) -> Option<AppLaunch> {
-    let name = match target {
-        Tool::ClaudeCode => "Claude",
-        Tool::Codex => "Codex",
+/// The desktop app for `target`, and its label. Claude Code lives in the
+/// Claude app's Code tab. Codex has its own app, and is also in the ChatGPT
+/// app's sidebar. Gemini has no desktop app for coding.
+fn find_app(target: Tool) -> Option<(AppLaunch, &'static str)> {
+    let names: &[(&str, &'static str)] = match target {
+        Tool::ClaudeCode => &[("Claude", "Claude app")],
+        Tool::Codex => &[("Codex", "Codex app"), ("ChatGPT", "ChatGPT app")],
         Tool::Gemini => return None,
     };
     #[cfg(target_os = "macos")]
     {
-        let home = dirs_home();
-        let mut candidates = vec![PathBuf::from(format!("/Applications/{name}.app"))];
-        if let Some(h) = home { candidates.push(h.join(format!("Applications/{name}.app"))); }
-        candidates.into_iter().find(|p| p.is_dir()).map(AppLaunch::Path)
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        for (name, label) in names {
+            let mut candidates = vec![PathBuf::from(format!("/Applications/{name}.app"))];
+            if let Some(h) = &home { candidates.push(h.join(format!("Applications/{name}.app"))); }
+            if let Some(p) = candidates.into_iter().find(|p| p.is_dir()) { return Some((AppLaunch::Path(p), label)); }
+        }
+        None
     }
     #[cfg(windows)]
     {
-        let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
-        let exes: Vec<PathBuf> = match target {
-            Tool::ClaudeCode => local.iter().flat_map(|l| [l.join(r"AnthropicClaude\claude.exe"), l.join(r"Programs\Claude\Claude.exe")]).collect(),
-            _ => local.iter().flat_map(|l| [l.join(r"Programs\Codex\Codex.exe"), l.join(r"Codex\Codex.exe")]).collect(),
+        let apps = start_menu_apps();
+        for (name, label) in names {
+            if let Some((_, id)) = apps.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)) {
+                return Some((AppLaunch::StartMenu(id.clone()), label));
+            }
+        }
+        // Older installs that aren't in the Start menu list.
+        let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+        let exe = match target {
+            Tool::ClaudeCode => [local.join(r"AnthropicClaude\claude.exe"), local.join(r"Programs\Claude\Claude.exe")],
+            _ => [local.join(r"Programs\Codex\Codex.exe"), local.join(r"Programs\ChatGPT\ChatGPT.exe")],
         };
-        if let Some(p) = exes.into_iter().find(|p| p.is_file()) { return Some(AppLaunch::Path(p)); }
-        // Store (MSIX) installs have no exe we can see, but register a link scheme.
-        let scheme = if target == Tool::ClaudeCode { "claude" } else { "codex" };
-        url_scheme_registered(scheme).then_some(AppLaunch::Url(if target == Tool::ClaudeCode { "claude://" } else { "codex://" }))
+        exe.into_iter().find(|p| p.is_file()).map(|p| (AppLaunch::Path(p), names[0].1))
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = name;
+        let _ = names;
         None
     }
 }
 
-#[cfg(target_os = "macos")]
-fn dirs_home() -> Option<PathBuf> { std::env::var_os("HOME").map(PathBuf::from) }
-
+/// Start menu apps as (name, app id), from PowerShell's Get-StartApps. Cached
+/// for five minutes: it takes about a second.
 #[cfg(windows)]
-fn url_scheme_registered(scheme: &str) -> bool {
+fn start_menu_apps() -> Vec<(String, String)> {
     use std::os::windows::process::CommandExt;
-    Command::new("reg").creation_flags(0x08000000)
-        .args(["query", &format!(r"HKCR\{scheme}"), "/v", "URL Protocol"])
-        .stdout(Stdio::null()).stderr(Stdio::null())
-        .status().is_ok_and(|s| s.success())
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    static CACHE: OnceLock<Mutex<Option<(Instant, Vec<(String, String)>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some((at, apps)) = cache.lock().ok().and_then(|c| c.clone()) {
+        if at.elapsed() < Duration::from_secs(300) { return apps; }
+    }
+    let Ok(ps) = powershell() else { return vec![] };
+    let out = Command::new(ps).creation_flags(0x08000000)
+        .args(["-NoProfile", "-Command", "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); Get-StartApps | Where-Object { $_.Name -match '^(Claude|Codex|ChatGPT)$' } | ForEach-Object { $_.Name + \"`t\" + $_.AppID }"])
+        .stdin(Stdio::null()).stderr(Stdio::null()).output();
+    let apps: Vec<(String, String)> = out.map(|o| String::from_utf8_lossy(&o.stdout).lines()
+        .filter_map(|l| l.split_once('\t').map(|(n, id)| (n.trim().to_owned(), id.trim().to_owned())))
+        .filter(|(n, id)| !n.is_empty() && !id.is_empty()).collect()).unwrap_or_default();
+    if let Ok(mut c) = cache.lock() { *c = Some((Instant::now(), apps.clone())); }
+    apps
 }
 
 fn app_label(target: Tool) -> &'static str {
-    match target { Tool::ClaudeCode => "Claude app", Tool::Codex => "Codex app", Tool::Gemini => "Gemini" }
+    find_app(target).map(|(_, l)| l).unwrap_or(match target { Tool::ClaudeCode => "Claude app", Tool::Codex => "Codex app", Tool::Gemini => "Gemini" })
 }
 
 /// Where `target` can open, best first: the desktop app, then the CLI in a
@@ -92,7 +112,7 @@ fn app_label(target: Tool) -> &'static str {
 /// opens its CLI. The web is always there.
 pub fn destinations(target: Tool, local_folder: bool) -> Vec<DestOption> {
     let mut out = Vec::new();
-    if find_app(target).is_some() { out.push(DestOption { dest: Dest::App, label: app_label(target).into() }); }
+    if let Some((_, label)) = find_app(target) { out.push(DestOption { dest: Dest::App, label: label.into() }); }
     if local_folder && handoff::cli(target).is_some() { out.push(DestOption { dest: Dest::Terminal, label: "Terminal".into() }); }
     out.push(DestOption { dest: Dest::Web, label: "Web".into() });
     out
@@ -131,12 +151,12 @@ pub fn copy_to_clipboard(prompt: &str) -> Result<(), String> {
 }
 
 fn open_app(target: Tool) -> bool {
-    match find_app(target) {
+    match find_app(target).map(|(a, _)| a) {
         #[cfg(target_os = "macos")]
         Some(AppLaunch::Path(p)) => Command::new("/usr/bin/open").arg("-a").arg(p).status().is_ok_and(|s| s.success()),
         #[cfg(not(target_os = "macos"))]
         Some(AppLaunch::Path(p)) => Command::new(p).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().is_ok(),
-        Some(AppLaunch::Url(u)) => tauri_plugin_opener::open_url(u, None::<&str>).is_ok(),
+        Some(AppLaunch::StartMenu(id)) => Command::new("explorer.exe").arg(format!("shell:AppsFolder\\{id}")).spawn().is_ok(),
         None => false,
     }
 }
@@ -186,6 +206,32 @@ end run"#;
         cmd.arg(first).spawn().is_ok()
     });
     Ok(started)
+}
+
+/// Start a dispatcher task: in a terminal with the task as the first message,
+/// or copied to the clipboard with the app or web page opened to paste it into.
+pub fn start_task(cwd: Option<&Path>, target: Tool, dest: Dest, prompt: &str) -> Result<String, String> {
+    let name = crate::tool_name(target);
+    match dest {
+        Dest::Terminal => {
+            let dir = cwd.ok_or("Clone this repo to run it in a terminal.")?;
+            if !open_terminal(dir, target, prompt)? { return Err("No terminal opened.".into()); }
+            Ok(format!("{name} started in a terminal"))
+        }
+        Dest::App => {
+            copy_to_clipboard(prompt)?;
+            if !open_app(target) {
+                tauri_plugin_opener::open_url(web_url(target), None::<&str>).map_err(|e| e.to_string())?;
+                return Ok(format!("Copied. The app didn't open, so {name} on the web did: paste it there"));
+            }
+            Ok(format!("Copied. Paste it into a new {name} session in the {}", app_label(target)))
+        }
+        Dest::Web => {
+            copy_to_clipboard(prompt)?;
+            tauri_plugin_opener::open_url(web_url(target), None::<&str>).map_err(|e| e.to_string())?;
+            Ok(format!("Copied. Paste it into {name} on the web"))
+        }
+    }
 }
 
 /// Hand the prompt to `target`. `cwd` is the project folder on this computer

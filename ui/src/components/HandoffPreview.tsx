@@ -4,6 +4,7 @@ import type { Dest, DestOption, HandoffPreviewData, Tool } from "../types";
 import { tint, toolName } from "../theme";
 import { ToolMark } from "./ToolMark";
 import { BackIcon, Check } from "./icons";
+import { preferredDest, rememberDest } from "../prefs";
 
 export { toolName };
 export type Draft = { source?: Tool; target: Tool; preview: Promise<HandoffPreviewData> };
@@ -33,7 +34,7 @@ export function HandoffPreview({ draft, onBack }: { draft: Draft; onBack: () => 
       if (!current) return;
       setData(p);
       setPrompt(p.prompt);
-      setDest(p.destinations[0]);
+      setDest(preferredDest(draft.target, p.destinations));
     }, (e) => { if (current) setError(String(e)); });
     return () => { current = false; };
   }, [draft]);
@@ -46,7 +47,7 @@ export function HandoffPreview({ draft, onBack }: { draft: Draft; onBack: () => 
     if (!data || !dest || busy) return;
     setBusy(true);
     setError("");
-    try { setDone(await api.launchHandoff(data.id, prompt, dest.dest)); }
+    try { setDone(await api.launchHandoff(data.id, prompt, dest.dest)); rememberDest(draft.target, dest.dest); }
     catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   }

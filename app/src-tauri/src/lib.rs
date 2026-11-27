@@ -135,7 +135,7 @@ async fn launch_handoff(window: tauri::WebviewWindow, state: State<'_, AppState>
 use aiuc_core::repo_handoff as rh;
 
 /// Repositories to show: the ones the user added, then those of recent sessions.
-fn repo_candidates(engine: &Mutex<Engine>) -> CmdResult<Vec<PathBuf>> {
+pub(crate) fn repo_candidates(engine: &Mutex<Engine>) -> CmdResult<Vec<PathBuf>> {
     let eng = engine.lock().map_err(err)?;
     let mut folders = eng.settings.repos.clone();
     folders.extend(eng.recent_projects(Utc::now()).map_err(err)?);
@@ -161,7 +161,130 @@ async fn list_repos(state: State<'_, AppState>, fetch: Option<bool>) -> CmdResul
                 .map(|r| std::thread::spawn(move || { let _ = rh::fetch(&r); })).collect();
             for h in handles { let _ = h.join(); }
         }
-        Ok(roots.iter().map(|r| rh::status(r)).collect())
+        let mut out: Vec<rh::RepoStatus> = roots.iter().map(|r| rh::status(r)).collect();
+        // Then everything else on GitHub, so cloud tasks can target any repo.
+        if let Some(token) = github_token(&engine) {
+            if let Ok(remote) = github_repos(&token, fetch.unwrap_or(false)) {
+                for r in remote {
+                    if !out.iter().any(|l| l.github.as_deref() == Some(r.html_url.as_str())) {
+                        out.push(rh::remote_status(&r));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }).await
+}
+
+// ---------------- GitHub ----------------
+
+use aiuc_core::github;
+
+fn github_token(engine: &Mutex<Engine>) -> Option<String> {
+    engine.lock().ok()?.store.kv_get(github::KV_TOKEN).ok().flatten().filter(|t| !t.is_empty())
+}
+
+/// The user's GitHub repos, cached for ten minutes.
+fn github_repos(token: &str, refresh: bool) -> anyhow::Result<Vec<github::GhRepo>> {
+    type Cached = Option<(Instant, String, Vec<github::GhRepo>)>;
+    static CACHE: Mutex<Cached> = Mutex::new(None);
+    if !refresh {
+        if let Some((at, t, repos)) = CACHE.lock().ok().and_then(|c| c.clone()) {
+            if t == token && at.elapsed() < Duration::from_secs(600) { return Ok(repos); }
+        }
+    }
+    let repos = github::repos(token)?;
+    if let Ok(mut c) = CACHE.lock() { *c = Some((Instant::now(), token.to_owned(), repos.clone())); }
+    Ok(repos)
+}
+
+#[derive(Serialize)]
+struct GithubStatus {
+    login: Option<String>,
+    /// The GitHub CLI is installed and signed in, so connecting takes one click.
+    cli: bool,
+    /// This build can "Sign in with GitHub".
+    device_flow: bool,
+}
+
+#[tauri::command]
+async fn github_status(state: State<'_, AppState>) -> CmdResult<GithubStatus> {
+    let engine = state.engine.clone();
+    blocking(move || {
+        let login = engine.lock().map_err(err)?.store.kv_get(github::KV_LOGIN).map_err(err)?;
+        let connected = github_token(&engine).is_some();
+        Ok(GithubStatus { login: login.filter(|_| connected), cli: !connected && github::gh_cli_token().is_some(), device_flow: github::client_id().is_some() })
+    }).await
+}
+
+fn save_github(engine: &Mutex<Engine>, token: &str) -> CmdResult<String> {
+    let login = github::whoami(token).map_err(err)?;
+    let eng = engine.lock().map_err(err)?;
+    eng.store.kv_set(github::KV_TOKEN, token).map_err(err)?;
+    eng.store.kv_set(github::KV_LOGIN, &login).map_err(err)?;
+    Ok(login)
+}
+
+/// Connect with the GitHub CLI's login, or a pasted token.
+#[tauri::command]
+async fn github_connect(state: State<'_, AppState>, token: Option<String>) -> CmdResult<String> {
+    let engine = state.engine.clone();
+    blocking(move || {
+        let token = match token.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty()) {
+            Some(t) => t,
+            None => github::gh_cli_token().ok_or("The GitHub CLI isn't signed in. Run `gh auth login`, or paste a token.")?,
+        };
+        save_github(&engine, &token)
+    }).await
+}
+
+/// "Sign in with GitHub": returns the code to enter, and opens the page.
+#[tauri::command]
+async fn github_device_start(app: AppHandle) -> CmdResult<github::DeviceCode> {
+    let id = github::client_id().ok_or("Sign in with GitHub isn't set up in this build.")?;
+    let code = blocking(move || github::device_start(id).map_err(err)).await?;
+    let _ = app.opener().open_url(code.verification_uri.clone(), None::<&str>);
+    Ok(code)
+}
+
+/// Poll once; returns the login when approved, nothing while waiting.
+#[tauri::command]
+async fn github_device_poll(state: State<'_, AppState>, device_code: String) -> CmdResult<Option<String>> {
+    let id = github::client_id().ok_or("Sign in with GitHub isn't set up in this build.")?;
+    let engine = state.engine.clone();
+    blocking(move || match github::device_poll(id, &device_code).map_err(err)? {
+        Some(token) => save_github(&engine, &token).map(Some),
+        None => Ok(None),
+    }).await
+}
+
+#[tauri::command]
+fn github_disconnect(state: State<AppState>) -> CmdResult<()> {
+    let eng = state.engine.lock().map_err(err)?;
+    eng.store.kv_del(github::KV_TOKEN).map_err(err)?;
+    eng.store.kv_del(github::KV_LOGIN).map_err(err)
+}
+
+/// Clone a GitHub repo into a folder you pick, and add it to the list.
+#[tauri::command]
+async fn clone_repo(app: AppHandle, state: State<'_, AppState>, full_name: String) -> CmdResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().set_title(format!("Where should {full_name} go?")).pick_folder(move |f| { let _ = tx.send(f); });
+    let engine = state.engine.clone();
+    blocking(move || {
+        let Some(Some(folder)) = rx.recv().ok() else { return Ok(None) };
+        let parent = folder.into_path().map_err(err)?;
+        if !full_name.split('/').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))) {
+            return Err("Not a repository name.".into());
+        }
+        let token = github_token(&engine);
+        let root = rh::clone(&parent, &full_name, token.as_deref()).map_err(err)?;
+        let mut eng = engine.lock().map_err(err)?;
+        eng.settings.repos.retain(|r| r != &root);
+        eng.settings.repos.insert(0, root.clone());
+        eng.save_settings().map_err(err)?;
+        Ok(Some(root.to_string_lossy().into_owned()))
     }).await
 }
 
@@ -665,6 +788,12 @@ pub fn run() {
             add_repo,
             forget_repo,
             preview_repo_handoff,
+            github_status,
+            github_connect,
+            github_device_start,
+            github_device_poll,
+            github_disconnect,
+            clone_repo,
             dispatch::plan_dispatch,
             dispatch::run_dispatch,
             dispatch::dismiss_agent,

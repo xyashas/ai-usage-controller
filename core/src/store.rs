@@ -73,6 +73,11 @@ CREATE TABLE IF NOT EXISTS savings (
 );
 "#;
 
+/// Columns added after a table first shipped. Errors mean "already there".
+fn migrate(conn: &Connection) {
+    let _ = conn.execute("ALTER TABLE tasks ADD COLUMN dest TEXT", []);
+}
+
 impl Store {
     pub fn open(path: &Path) -> Result<Store> {
         if let Some(dir) = path.parent() {
@@ -80,12 +85,14 @@ impl Store {
         }
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn);
         Ok(Store { conn })
     }
 
     pub fn open_in_memory() -> Result<Store> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn);
         Ok(Store { conn })
     }
 
@@ -329,8 +336,8 @@ impl Store {
 
     pub fn insert_task(&self, t: &TaskRow) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO tasks (created_at, repo, cwd, branch, tool, text) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![ms(t.created_at), t.repo, t.cwd, t.branch, t.tool.as_str(), t.text],
+            "INSERT INTO tasks (created_at, repo, cwd, branch, tool, text, dest) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![ms(t.created_at), t.repo, t.cwd, t.branch, t.tool.as_str(), t.text, t.dest],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -338,7 +345,7 @@ impl Store {
     /// Tasks started since `from` that weren't dismissed, newest first.
     pub fn tasks_since(&self, from: DateTime<Utc>) -> Result<Vec<TaskRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, created_at, repo, cwd, branch, tool, text FROM tasks WHERE created_at >= ?1 AND dismissed = 0 ORDER BY created_at DESC, id DESC",
+            "SELECT id, created_at, repo, cwd, branch, tool, text, dest FROM tasks WHERE created_at >= ?1 AND dismissed = 0 ORDER BY created_at DESC, id DESC",
         )?;
         let rows = stmt.query_map(params![ms(from)], |r| {
             let tool: String = r.get(5)?;
@@ -350,6 +357,7 @@ impl Store {
                 branch: r.get(4)?,
                 tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
                 text: r.get(6)?,
+                dest: r.get(7)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -389,4 +397,6 @@ pub struct TaskRow {
     pub branch: Option<String>,
     pub tool: Tool,
     pub text: String,
+    /// "terminal", "app" or "web".
+    pub dest: Option<String>,
 }

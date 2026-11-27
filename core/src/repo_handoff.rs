@@ -168,6 +168,11 @@ pub fn fetch(root: &Path) -> Result<()> {
 /// What the widget shows for one repository.
 #[derive(Debug, Clone, Serialize)]
 pub struct RepoStatus {
+    /// What the UI passes back: the folder path, or `github:owner/name` for a
+    /// repository that's only on GitHub.
+    pub id: String,
+    /// Cloned on this computer.
+    pub local: bool,
     pub root: PathBuf,
     /// Folder name, or `owner/name` when origin is on GitHub.
     pub name: String,
@@ -198,7 +203,15 @@ pub fn status(root: &Path) -> RepoStatus {
     let folder = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let name = github.as_deref().and_then(|g| g.strip_prefix("https://github.com/")).map(str::to_owned).unwrap_or(folder);
     let current_branch = git(root, &["rev-parse", "--abbrev-ref", "HEAD"]).map(|s| s.trim().to_owned()).unwrap_or_default();
-    RepoStatus { root: root.to_owned(), name, set_up: is_set_up(root), current_branch, github, latest: latest(root).ok().flatten() }
+    RepoStatus { id: root.to_string_lossy().into_owned(), local: true, root: root.to_owned(), name, set_up: is_set_up(root), current_branch, github, latest: latest(root).ok().flatten() }
+}
+
+/// A repository that's on GitHub but not cloned here.
+pub fn remote_status(repo: &crate::github::GhRepo) -> RepoStatus {
+    RepoStatus {
+        id: format!("github:{}", repo.full_name), local: false, root: PathBuf::new(), name: repo.full_name.clone(),
+        set_up: false, current_branch: repo.default_branch.clone(), github: Some(repo.html_url.clone()), latest: None,
+    }
 }
 
 /// Distinct repository roots for these folders, in order. Folders that aren't
@@ -235,6 +248,21 @@ pub fn continue_prompt(repo_name: &str, latest: &Latest, cloud: bool) -> String 
 /// Run git without a console window or credential prompts.
 pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
     git_with_timeout(dir, args, Duration::from_secs(15))
+}
+
+/// Clone `owner/name` into `parent/name`. The token is used for the download
+/// only; the saved remote is the plain GitHub URL.
+pub fn clone(parent: &Path, full_name: &str, token: Option<&str>) -> Result<PathBuf> {
+    let name = full_name.rsplit('/').next().filter(|n| !n.is_empty() && !n.starts_with('.')).ok_or_else(|| anyhow!("Not a repository name"))?;
+    let dest = parent.join(name);
+    ensure!(!dest.exists(), "{} already exists. Add it with + instead.", dest.display());
+    let plain = format!("https://github.com/{full_name}.git");
+    let url = token.map(|t| format!("https://x-access-token:{t}@github.com/{full_name}.git")).unwrap_or_else(|| plain.clone());
+    let dest_s = dest.to_string_lossy().into_owned();
+    git_with_timeout(parent, &["clone", "--quiet", &url, &dest_s], Duration::from_secs(600))
+        .map_err(|e| anyhow!("{}", e.to_string().replace(token.unwrap_or("\u{0}"), "***")))?;
+    git(&dest, &["remote", "set-url", "origin", &plain])?;
+    Ok(dest)
 }
 
 fn git_with_timeout(dir: &Path, args: &[&str], timeout: Duration) -> Result<String> {

@@ -128,11 +128,13 @@ export type Dest = "app" | "terminal" | "web";
 export interface DestOption { dest: Dest; label: string }
 export interface HandoffPreviewData { id: number; prompt: string; destinations: DestOption[]; place: string }
 export interface RepoLatest { branch: string; updated_at: number; origin: "commit" | "working tree"; content: string }
-export interface RepoStatus { root: string; name: string; set_up: boolean; current_branch: string; github: string | null; latest: RepoLatest | null }
+export interface RepoStatus { id: string; local: boolean; root: string; name: string; set_up: boolean; current_branch: string; github: string | null; latest: RepoLatest | null }
 export interface SetupResult { root: string; changed: string[]; committed: boolean }
 
-export interface AgentRun { id: number; tool: Tool; text: string; repo_name: string; branch: string | null; cwd: string; started_at: string; state: "starting" | "working" | "idle" | "no_activity"; cost_usd: number; requests: number; last_activity_at: string | null }
+export interface AgentRun { id: number; tool: Tool; text: string; repo_name: string; branch: string | null; cwd: string; started_at: string; state: "starting" | "working" | "idle" | "no_activity" | "opened"; dest: Dest | null; cost_usd: number; requests: number; last_activity_at: string | null }
 export interface Routed { text: string; tool: Tool | null; explicit: boolean; reason: string }
 export interface ToolRoom { tool: Tool; ready: boolean; used_pct: number | null; active: boolean }
-export interface DispatchPlan { tasks: Routed[]; rooms: ToolRoom[] }
-export interface Started { text: string; tool: Tool; branch: string | null; error: string | null }
+export interface DispatchPlan { tasks: Routed[]; rooms: ToolRoom[]; dests: Record<Tool, DestOption[]> }
+export interface Started { text: string; tool: Tool; dest: Dest; branch: string | null; message: string | null; error: string | null }
+export interface GithubStatus { login: string | null; cli: boolean; device_flow: boolean }
+export interface DeviceCode { device_code: string; user_code: string; verification_uri: string; interval: number }

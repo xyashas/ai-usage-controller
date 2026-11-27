@@ -85,12 +85,13 @@ fn each_task_gets_its_own_worktree_and_branch() {
 fn agent_runs_follow_the_session_in_the_task_folder() {
     let eng = Engine::in_memory().unwrap();
     let now = Utc::now();
-    let row = |cwd: &str, tool, mins| TaskRow { id: 0, created_at: now - Duration::minutes(mins), repo: "/dev/shop".into(), cwd: cwd.into(), branch: Some("agents/x".into()), tool, text: "Fix it".into() };
+    let row = |cwd: &str, tool, mins| TaskRow { id: 0, created_at: now - Duration::minutes(mins), repo: "/dev/shop".into(), cwd: cwd.into(), branch: Some("agents/x".into()), tool, text: "Fix it".into(), dest: Some("terminal".into()) };
     let working = eng.record_task(&row("/dev/shop.agents/a", Tool::Codex, 10)).unwrap();
     let idle = eng.record_task(&row("/dev/shop.agents/b", Tool::ClaudeCode, 30)).unwrap();
     let fresh = eng.record_task(&row("/dev/shop.agents/c", Tool::Codex, 1)).unwrap();
     let stale = eng.record_task(&row("/dev/shop.agents/d", Tool::Codex, 20)).unwrap();
     let gone = eng.record_task(&row("/dev/shop.agents/e", Tool::Codex, 20)).unwrap();
+    let web = eng.record_task(&TaskRow { dest: Some("web".into()), ..row("acme/shop", Tool::Codex, 20) }).unwrap();
     eng.dismiss_task(gone).unwrap();
 
     let ev = |tool, cwd: &str, ago_s: i64, cost: f64| {
@@ -109,6 +110,7 @@ fn agent_runs_follow_the_session_in_the_task_folder() {
     assert_eq!(state(fresh), Some("starting"));
     assert_eq!(state(stale), Some("no_activity"));
     assert_eq!(state(gone), None, "dismissed");
+    assert_eq!(state(web), Some("opened"));
     let w = runs.iter().find(|r| r.id == working).unwrap();
     assert_eq!((w.requests, w.cost_usd, w.repo_name.as_str()), (2, 0.75, "shop"));
     assert_eq!(runs[0].id, fresh, "newest first");

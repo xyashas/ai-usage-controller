@@ -13,6 +13,7 @@
 pub mod advice;
 pub mod dispatch;
 pub mod engine;
+pub mod github;
 pub mod handoff;
 pub mod entitlements;
 pub mod licence;

@@ -6,6 +6,7 @@ import { tint, toolName } from "../theme";
 import { TopBar } from "./TopBar";
 import { ToolMark } from "./ToolMark";
 import { BranchIcon, CloseIcon, PlusIcon, RefreshIcon } from "./icons";
+import { GithubConnect, GithubMark } from "./GithubConnect";
 
 const ALL: Tool[] = ["claude_code", "codex", "gemini"];
 
@@ -114,6 +115,29 @@ function RepoTile({ repo, onPick, onChanged }: { repo: RepoStatus; onPick: (r: R
   );
 }
 
+function RemoteRow({ repo, onCloned }: { repo: RepoStatus; onCloned: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function clone() {
+    setBusy(true);
+    setErr("");
+    try { if (await api.cloneRepo(repo.name)) onCloned(); }
+    catch (e) { setErr(String(e)); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="flex items-center gap-2.5 rounded-2xl px-3 py-2 hover:bg-white/[0.04]">
+      <span className="text-muted"><GithubMark /></span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[12.5px] font-medium">{repo.name}</p>
+        {err && <p className="text-[11px] text-bad">{err}</p>}
+      </div>
+      <button className="btn btn-ghost !px-2 !py-1 text-[11.5px]" onClick={() => repo.github && api.openUrl(repo.github)}>Open</button>
+      <button disabled={busy} className="btn !px-3 !py-1 text-[11.5px]" onClick={clone}>{busy ? "Cloning…" : "Clone"}</button>
+    </div>
+  );
+}
+
 export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
   onView: (v: View) => void; onHandoff: (o: HandoffOffer, t: Tool) => void; onRepoHandoff: (r: RepoStatus, t: Tool) => void;
 }) {
@@ -121,6 +145,7 @@ export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
   const [repos, setRepos] = useState<RepoStatus[] | null>(null);
   const [fetching, setFetching] = useState(false);
   const [err, setErr] = useState("");
+  const [allRemote, setAllRemote] = useState(false);
 
   const load = useCallback(async (fetch: boolean) => {
     if (fetch) setFetching(true);
@@ -159,14 +184,30 @@ export function HandoffHub({ onView, onHandoff, onRepoHandoff }: {
       </div>
       {repos == null ? (
         <p className="px-1 py-3 text-[12px] text-muted">Looking for your repos…</p>
-      ) : repos.length ? (
-        repos.map((r) => <RepoTile key={r.root} repo={r} onPick={onRepoHandoff} onChanged={() => load(false)} />)
+      ) : repos.some((r) => r.local) ? (
+        repos.filter((r) => r.local).map((r) => <RepoTile key={r.id} repo={r} onPick={onRepoHandoff} onChanged={() => load(false)} />)
       ) : (
         <section className="tile space-y-2 text-center">
           <p className="text-[12.5px] text-muted">Repos you work in with Claude Code or Codex show up here.</p>
           <button className="btn" onClick={add}><PlusIcon />Add a repo</button>
         </section>
       )}
+      {repos && (repos.some((r) => !r.local) ? (
+        <>
+          <p className="eyebrow px-1 pt-1">On GitHub</p>
+          <section className="tile !p-1">
+            {repos.filter((r) => !r.local).slice(0, allRemote ? undefined : 5).map((r) => <RemoteRow key={r.id} repo={r} onCloned={() => load(false)} />)}
+            {!allRemote && repos.filter((r) => !r.local).length > 5 && (
+              <button className="w-full rounded-2xl py-2 text-[12px] text-muted hover:bg-white/[0.04] hover:text-fg" onClick={() => setAllRemote(true)}>
+                Show all {repos.filter((r) => !r.local).length}
+              </button>
+            )}
+          </section>
+          <GithubConnect compact onChange={() => load(false)} />
+        </>
+      ) : (
+        <GithubConnect onChange={() => load(true)} />
+      ))}
       {err && <p className="px-1 text-[11.5px] text-bad">{err}</p>}
     </div>
   );

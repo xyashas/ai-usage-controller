@@ -8,16 +8,21 @@ use aiuc_core::repo_handoff as rh;
 use aiuc_core::store::TaskRow;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::State;
 
 #[derive(Serialize)]
 pub struct Plan {
     pub tasks: Vec<Routed>,
     pub rooms: Vec<ToolRoom>,
+    /// Where each tool can open for this repo, best first.
+    pub dests: BTreeMap<Tool, Vec<handoff::DestOption>>,
 }
 
-/// Each tool's room (5-hour limit first) and whether its CLI is installed.
+/// Each tool's room (5-hour limit first). Every enabled tool can run a task:
+/// at worst on the web.
 fn rooms(state: &AppState) -> CmdResult<Vec<ToolRoom>> {
     let snap = match state.last.lock().map_err(err)?.clone() {
         Some(s) => s,
@@ -26,65 +31,112 @@ fn rooms(state: &AppState) -> CmdResult<Vec<ToolRoom>> {
     Ok(Tool::ALL.into_iter().map(|tool| {
         let status = snap.tools.iter().find(|t| t.tool == tool);
         let used_pct = status.and_then(|t| {
-            let known = t.windows.iter().filter(|w| w.source != aiuc_core::metrics::Source::Learning);
-            let w: Vec<_> = known.collect();
+            let w: Vec<_> = t.windows.iter().filter(|w| w.source != aiuc_core::metrics::Source::Learning).collect();
             w.iter().find(|w| w.key == "five_hour").or(w.iter().min_by(|a, b| a.headroom_pct.total_cmp(&b.headroom_pct))).map(|w| w.used_pct)
         });
-        let enabled = status.is_none_or(|t| t.enabled);
-        ToolRoom { tool, ready: enabled && aiuc_core::handoff::cli(tool).is_some(), used_pct, active: snap.active_tool == Some(tool) }
+        ToolRoom { tool, ready: status.is_none_or(|t| t.enabled), used_pct, active: snap.active_tool == Some(tool) }
     }).collect())
 }
 
+/// A repo id from the UI: a folder on this computer, or `github:owner/name`.
+pub enum Repo {
+    Local(PathBuf),
+    GitHub(String),
+}
+
+pub fn resolve(engine: &Mutex<aiuc_core::Engine>, id: &str) -> CmdResult<Repo> {
+    if let Some(name) = id.strip_prefix("github:") {
+        let valid = name.split('/').count() == 2 && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c));
+        return if valid { Ok(Repo::GitHub(name.to_owned())) } else { Err("Not a GitHub repository.".into()) };
+    }
+    let root = rh::repo_root(std::path::Path::new(id)).map_err(err)?;
+    // Only repos the widget lists, so a page can't point this at any folder.
+    if !crate::repo_candidates(engine)?.contains(&root) { return Err("That repository isn't in your list.".into()); }
+    Ok(Repo::Local(root))
+}
+
 #[tauri::command]
-pub async fn plan_dispatch(state: State<'_, AppState>, text: String) -> CmdResult<Plan> {
+pub async fn plan_dispatch(state: State<'_, AppState>, text: String, repo: Option<String>) -> CmdResult<Plan> {
     let rooms = rooms(&state)?;
-    let tasks = dispatch::route(&dispatch::split(&text), &rooms);
-    Ok(Plan { tasks, rooms })
+    let engine = state.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let local = match repo.as_deref() { Some(id) => matches!(resolve(&engine, id)?, Repo::Local(_)), None => true };
+        let tasks = dispatch::route(&dispatch::split(&text), &rooms);
+        let dests = Tool::ALL.into_iter().map(|t| (t, handoff::destinations(t, local))).collect();
+        Ok(Plan { tasks, rooms, dests })
+    }).await.map_err(err)?
 }
 
 #[derive(Deserialize)]
 pub struct RunTask {
     pub text: String,
     pub tool: Tool,
+    pub dest: handoff::Dest,
 }
 
 #[derive(Serialize)]
 pub struct Started {
     pub text: String,
     pub tool: Tool,
+    pub dest: handoff::Dest,
     pub branch: Option<String>,
+    /// What happened, e.g. "Copied. Paste it into Codex in the ChatGPT app".
+    pub message: Option<String>,
     pub error: Option<String>,
 }
 
+/// What an app or web session is told: the repo and branch, since it can't see
+/// which folder the task came from.
+fn pasted_prompt(repo_name: &str, folder: Option<&std::path::Path>, branch: Option<&str>, text: &str) -> String {
+    match (folder, branch) {
+        (Some(f), Some(b)) => format!("In the project folder {} (branch `{b}`):\n\n{text}", f.display()),
+        (Some(f), None) => format!("In the project folder {}:\n\n{text}", f.display()),
+        (None, _) => format!("In the GitHub repo {repo_name}, on a new branch:\n\n{text}"),
+    }
+}
+
 #[tauri::command]
-pub async fn run_dispatch(window: tauri::WebviewWindow, state: State<'_, AppState>, repo: PathBuf, tasks: Vec<RunTask>, worktrees: bool) -> CmdResult<Vec<Started>> {
+pub async fn run_dispatch(window: tauri::WebviewWindow, state: State<'_, AppState>, repo: String, tasks: Vec<RunTask>, worktrees: bool) -> CmdResult<Vec<Started>> {
     if window.label() != "widget" { return Err("Open the widget to run tasks.".into()); }
     if tasks.is_empty() || tasks.len() > 6 { return Err("Run between 1 and 6 tasks at a time.".into()); }
     let engine = state.engine.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let root = rh::repo_root(&repo).map_err(err)?;
+        let target = resolve(&engine, &repo)?;
+        let (root, repo_name) = match &target {
+            Repo::Local(root) => (Some(root.clone()), rh::status(root).name),
+            Repo::GitHub(name) => (None, name.clone()),
+        };
         let mut out = Vec::new();
         for t in tasks {
             let text = t.text.trim().to_string();
             if text.is_empty() { continue; }
-            let started = (|| -> Result<Option<String>, String> {
-                let (cwd, branch) = if worktrees {
-                    let (dir, branch) = dispatch::create_worktree(&root, &text).map_err(|e| format!("Couldn't create a worktree: {e}"))?;
-                    (dir, Some(branch))
-                } else {
-                    let b = rh::git(&root, &["rev-parse", "--abbrev-ref", "HEAD"]).ok().map(|s| s.trim().to_string());
-                    (root.clone(), b)
+            let started = (|| -> Result<(Option<String>, String, String), String> {
+                // Local tasks get a worktree when asked; web tasks run in the cloud.
+                let (cwd, branch) = match (&root, t.dest) {
+                    (Some(root), handoff::Dest::Terminal | handoff::Dest::App) if worktrees => {
+                        let (dir, branch) = dispatch::create_worktree(root, &text).map_err(|e| format!("Couldn't create a worktree: {e}"))?;
+                        (Some(dir), Some(branch))
+                    }
+                    (Some(root), _) => (Some(root.clone()), rh::git(root, &["rev-parse", "--abbrev-ref", "HEAD"]).ok().map(|s| s.trim().to_string())),
+                    (None, _) => (None, None),
                 };
-                if !handoff::open_terminal(&cwd, t.tool, &text)? {
-                    return Err("No terminal opened.".into());
-                }
-                let row = TaskRow { id: 0, created_at: Utc::now(), repo: root.to_string_lossy().into_owned(), cwd: cwd.to_string_lossy().into_owned(), branch: branch.clone(), tool: t.tool, text: text.clone() };
-                engine.lock().map_err(err)?.record_task(&row).map_err(err)?;
-                Ok(branch)
+                let prompt = if t.dest == handoff::Dest::Terminal { text.clone() } else {
+                    let folder = if t.dest == handoff::Dest::App { cwd.as_deref() } else { None };
+                    pasted_prompt(&repo_name, folder, branch.as_deref(), &text)
+                };
+                let message = handoff::start_task(cwd.as_deref(), t.tool, t.dest, &prompt)?;
+                let where_ = cwd.as_ref().map(|c| c.to_string_lossy().into_owned()).unwrap_or_else(|| repo_name.clone());
+                Ok((branch, message, where_))
             })();
             match started {
-                Ok(branch) => out.push(Started { text, tool: t.tool, branch, error: None }),
-                Err(e) => out.push(Started { text, tool: t.tool, branch: None, error: Some(e) }),
+                Ok((branch, message, cwd)) => {
+                    let dest = serde_json::to_value(t.dest).ok().and_then(|v| v.as_str().map(str::to_owned));
+                    let repo_field = root.as_ref().map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|| repo_name.clone());
+                    let row = TaskRow { id: 0, created_at: Utc::now(), repo: repo_field, cwd, branch: branch.clone(), tool: t.tool, text: text.clone(), dest };
+                    engine.lock().map_err(err)?.record_task(&row).map_err(err)?;
+                    out.push(Started { text, tool: t.tool, dest: t.dest, branch, message: Some(message), error: None });
+                }
+                Err(e) => out.push(Started { text, tool: t.tool, dest: t.dest, branch: None, message: None, error: Some(e) }),
             }
         }
         Ok(out)

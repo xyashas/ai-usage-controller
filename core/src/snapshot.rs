@@ -126,8 +126,11 @@ pub struct AgentRun {
     pub cwd: String,
     pub started_at: DateTime<Utc>,
     /// "starting" (no activity yet), "working" (active in the last 90 s),
-    /// "idle" (waiting for you, or done), "no_activity" (never started).
+    /// "idle" (waiting for you, or done), "no_activity" (never started),
+    /// "opened" (handed to an app or the web; not tracked from here).
     pub state: String,
+    /// "terminal", "app" or "web".
+    pub dest: Option<String>,
     pub cost_usd: f64,
     pub requests: u64,
     pub last_activity_at: Option<DateTime<Utc>>,

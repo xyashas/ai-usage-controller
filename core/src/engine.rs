@@ -183,12 +183,15 @@ impl Engine {
             let state = match last {
                 Some(l) if now - l <= Duration::seconds(90) => "working",
                 Some(_) => "idle",
+                None if matches!(t.dest.as_deref(), Some("app" | "web")) => "opened",
                 None if now - t.created_at <= Duration::minutes(5) => "starting",
                 None => "no_activity",
             };
-            let repo_name = std::path::Path::new(&t.repo).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            // GitHub-only repos are stored as "owner/name".
+            let path = std::path::Path::new(&t.repo);
+            let repo_name = if path.is_absolute() { path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() } else { t.repo.clone() };
             out.push(crate::snapshot::AgentRun {
-                id: t.id, tool: t.tool, text: t.text, repo_name, branch: t.branch, cwd: t.cwd,
+                id: t.id, tool: t.tool, text: t.text, repo_name, branch: t.branch, cwd: t.cwd, dest: t.dest,
                 started_at: t.created_at, state: state.into(),
                 cost_usd: events.iter().map(|e| e.cost_usd).sum(),
                 requests: events.len() as u64,

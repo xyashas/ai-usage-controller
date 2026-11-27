@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { View } from "../App";
-import type { AgentRun, DispatchPlan, RepoStatus, Snapshot, Started, Tool } from "../types";
+import type { AgentRun, Dest, DestOption, DispatchPlan, RepoStatus, Snapshot, Started, Tool } from "../types";
+import { preferredDest, rememberDest } from "../prefs";
+import { GithubConnect, GithubMark } from "./GithubConnect";
 import { api } from "../api";
 import { tint, toolName } from "../theme";
 import { usd } from "../format";
@@ -15,6 +17,7 @@ export const stateLabel: Record<AgentRun["state"], string> = {
   working: "Working",
   idle: "Your turn",
   no_activity: "Not started",
+  opened: "Opened",
 };
 
 function since(iso: string) {
@@ -39,6 +42,7 @@ function AgentRow({ a, refresh }: { a: AgentRun; refresh: () => void }) {
         <p className="flex items-center gap-1 truncate text-[11px] text-muted">
           <span>{a.repo_name}</span>
           {a.branch && <><span>·</span><BranchIcon /><span className="truncate">{a.branch}</span></>}
+          {a.dest && a.dest !== "terminal" && <span>· {a.dest === "web" ? "web" : "app"}</span>}
         </p>
       </div>
       <div className="shrink-0 text-right">
@@ -52,41 +56,63 @@ function AgentRow({ a, refresh }: { a: AgentRun; refresh: () => void }) {
   );
 }
 
+type RunItem = { text: string; tool: Tool; dest: DestOption };
+
 export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: (v: View) => void; refresh: () => void }) {
   const [repos, setRepos] = useState<RepoStatus[] | null>(null);
   const [repo, setRepo] = useState("");
   const [text, setText] = useState("");
   const [plan, setPlan] = useState<DispatchPlan | null>(null);
   const [picks, setPicks] = useState<Record<number, Tool>>({});
+  const [destPicks, setDestPicks] = useState<Record<number, Dest>>({});
+  // App and web tasks go one at a time: each needs a paste from the clipboard.
+  const [queue, setQueue] = useState<{ repo: string; tasks: RunItem[] } | null>(null);
+  const [github, setGithub] = useState(false);
   const [worktrees, setWorktrees] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Started[] | null>(null);
   const [err, setErr] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
 
+  const loadRepos = () => api.listRepos(false).then((r) => { setRepos(r); setRepo((cur) => cur || r[0]?.id || ""); }, () => setRepos([]));
   useEffect(() => {
-    api.listRepos(false).then((r) => { setRepos(r); setRepo((cur) => cur || r[0]?.root || ""); }, () => setRepos([]));
+    loadRepos();
     api.focus().finally(() => box.current?.focus({ preventScroll: true }));
   }, []);
 
   // Re-plan as you type.
   useEffect(() => {
     if (!text.trim()) { setPlan(null); return; }
-    const id = setTimeout(() => api.planDispatch(text).then((p) => { setPlan(p); setPicks({}); }, () => {}), 220);
+    const id = setTimeout(() => api.planDispatch(text, repo || null).then((p) => { setPlan(p); setPicks({}); setDestPicks({}); }, () => {}), 220);
     return () => clearTimeout(id);
-  }, [text]);
+  }, [text, repo]);
 
-  const tasks = (plan?.tasks ?? []).map((t, i) => ({ ...t, tool: picks[i] ?? t.tool }));
   const ready = new Set(plan?.rooms.filter((r) => r.ready).map((r) => r.tool));
-  const runnable = tasks.length > 0 && tasks.every((t) => t.tool && ready.has(t.tool)) && !!repo;
-  const useWorktrees = worktrees ?? tasks.length > 1;
-  const current = repos?.find((r) => r.root === repo);
+  const tasks = (plan?.tasks ?? []).map((t, i) => {
+    const tool = picks[i] ?? t.tool;
+    const options: DestOption[] = tool ? plan?.dests[tool] ?? [] : [];
+    const dest = options.find((o) => o.dest === destPicks[i]) ?? (tool ? preferredDest(tool, options) : undefined);
+    return { ...t, tool, options, dest };
+  });
+  const runnable = tasks.length > 0 && tasks.every((t) => t.tool && ready.has(t.tool) && t.dest) && !!repo;
+  const current = repos?.find((r) => r.id === repo);
+  const local = current?.local ?? true;
+  const anyLocal = tasks.some((t) => t.dest && t.dest.dest !== "web");
+  const useWorktrees = local && (worktrees ?? tasks.length > 1);
 
   function cycle(i: number) {
     const order = (["claude_code", "codex", "gemini"] as Tool[]).filter((t) => ready.has(t));
     if (!order.length) return;
     const now = tasks[i].tool;
     setPicks({ ...picks, [i]: order[(order.indexOf(now as Tool) + 1) % order.length] });
+    setDestPicks({ ...destPicks, [i]: undefined as unknown as Dest });
+  }
+
+  function cycleDest(i: number) {
+    const t = tasks[i];
+    if (t.options.length < 2 || !t.dest) return;
+    const next = t.options[(t.options.findIndex((o) => o.dest === t.dest!.dest) + 1) % t.options.length];
+    setDestPicks({ ...destPicks, [i]: next.dest });
   }
 
   async function dictate() {
@@ -97,15 +123,39 @@ export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: 
     catch (e) { setErr(String(e)); }
   }
 
+  async function send(repoId: string, items: RunItem[], wt: boolean) {
+    const started = await api.runDispatch(repoId, items.map(({ text, tool, dest }) => ({ text, tool, dest: dest.dest })), wt);
+    setResult((prev) => [...(prev ?? []), ...started]);
+    started.forEach((s) => { if (!s.error) rememberDest(s.tool, s.dest); });
+    refresh();
+    return started;
+  }
+
   async function run() {
     if (!runnable || busy) return;
     setBusy(true);
     setErr("");
+    setResult([]);
     try {
-      const started = await api.runDispatch(repo, tasks.map((t) => ({ text: t.text, tool: t.tool! })), useWorktrees);
-      setResult(started);
+      const items: RunItem[] = tasks.map((t) => ({ text: t.text, tool: t.tool!, dest: t.dest! }));
+      // Terminals all start at once; the first app/web task too. The rest wait
+      // for "Next", so each gets the clipboard to itself.
+      const terminal = items.filter((t) => t.dest.dest === "terminal");
+      const pasted = items.filter((t) => t.dest.dest !== "terminal");
+      const first = [...terminal, ...pasted.slice(0, 1)];
+      const started = await send(repo, first, useWorktrees);
+      setQueue(pasted.length > 1 ? { repo, tasks: pasted.slice(1) } : null);
       if (started.some((s) => !s.error)) { setText(""); setPlan(null); setWorktrees(null); }
-      refresh();
+    } catch (e) { setErr(String(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function next() {
+    if (!queue || busy) return;
+    setBusy(true);
+    try {
+      await send(queue.repo, queue.tasks.slice(0, 1), useWorktrees);
+      setQueue(queue.tasks.length > 1 ? { ...queue, tasks: queue.tasks.slice(1) } : null);
     } catch (e) { setErr(String(e)); }
     finally { setBusy(false); }
   }
@@ -138,12 +188,22 @@ export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: 
               onChange={(e) => setRepo(e.target.value)}
               className="max-w-[170px] truncate rounded-full bg-white/[0.07] px-3 py-1.5 text-[12px] outline-none"
             >
-              {repos.map((r) => <option key={r.root} value={r.root}>{r.name}</option>)}
+              {repos.some((r) => r.local) && (
+                <optgroup label="On this computer">
+                  {repos.filter((r) => r.local).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </optgroup>
+              )}
+              {repos.some((r) => !r.local) && (
+                <optgroup label="On GitHub (cloud)">
+                  {repos.filter((r) => !r.local).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </optgroup>
+              )}
             </select>
-          ) : (
-            <button className="btn btn-ghost !py-1.5 text-[12px]" onClick={() => onView("handoffs")}>Add a repo</button>
+          ) : null}
+          {!repos?.some((r) => !r.local) && (
+            <button className="icon-btn" title="Connect GitHub to use all your repos" aria-label="Connect GitHub" onClick={() => setGithub(!github)}><GithubMark /></button>
           )}
-          <button
+          {local && anyLocal && <button
             role="switch"
             aria-checked={useWorktrees}
             onClick={() => setWorktrees(!useWorktrees)}
@@ -154,7 +214,7 @@ export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: 
               <span className={`h-[10px] w-[10px] rounded-full bg-white transition-transform ${useWorktrees ? "translate-x-[10px]" : ""}`} />
             </span>
             Worktrees
-          </button>
+          </button>}
           <button disabled={!runnable || busy} onClick={run} className="btn btn-primary ml-auto !py-1.5">
             {busy ? "Starting…" : tasks.length > 1 ? `Run ${tasks.length} tasks` : "Run"}
             <span className="text-[10.5px] font-medium opacity-50">{mac ? "⌘↵" : "Ctrl↵"}</span>
@@ -178,27 +238,50 @@ export function AgentsView({ snap, onView, refresh }: { snap: Snapshot; onView: 
                   {t.tool && <ToolMark tool={t.tool} />}
                   {t.tool ? toolName[t.tool] : "No tool"}
                 </button>
-                <span className="min-w-0 flex-1 truncate text-[12.5px]">{t.text}</span>
-                <span className={`shrink-0 text-[10.5px] ${blocked ? "text-bad" : "text-mute"}`}>{picks[i] ? "Your pick" : t.reason}</span>
+                <span className="min-w-0 flex-1 truncate text-[12.5px]" title={picks[i] ? "Your pick" : t.reason}>{t.text}</span>
+                {blocked ? (
+                  <span className="shrink-0 text-[10.5px] text-bad">{t.reason}</span>
+                ) : t.dest && (
+                  <button
+                    onClick={() => cycleDest(i)}
+                    disabled={t.options.length < 2}
+                    title={t.options.length > 1 ? `Open in: ${t.options.map((o) => o.label).join(", ")}. Click to change.` : undefined}
+                    className="shrink-0 rounded-full bg-white/[0.07] px-2.5 py-1 text-[11px] font-medium text-muted transition-colors hover:bg-white/[0.12] hover:text-fg"
+                  >
+                    {t.dest.label}{t.options.length > 1 ? " ▾" : ""}
+                  </button>
+                )}
               </div>
             );
           })}
           <p className="px-1 pt-0.5 text-[11px] text-mute">
-            {useWorktrees
+            {!local
+              ? `Runs in the cloud on ${current?.name}. Each task is copied for you to paste into a new session.`
+              : useWorktrees
               ? `Each task gets its own branch from ${current?.current_branch || "the current commit"}, in ${current?.root.split(/[\\/]/).pop() || "the repo"}.agents/ next to the repo. Uncommitted changes stay where they are.`
               : `Runs in ${current?.name || "the repo"} on ${current?.current_branch || "the current branch"}.`}
-            {" "}Each opens in its own terminal.
+            {local && " Terminal tasks start together; app and web tasks are copied one at a time for you to paste."}
           </p>
         </section>
       )}
 
-      {result && (
-        <section className="tile fade-in space-y-1 !py-3">
+      {github && <GithubConnect onChange={() => { setGithub(false); loadRepos(); }} />}
+
+      {result && result.length > 0 && (
+        <section className="tile fade-in space-y-1.5 !py-3">
           {result.map((r, i) => (
-            <p key={i} className={`text-[12px] ${r.error ? "text-bad" : "text-muted"}`}>
-              {r.error ? `✗ ${r.text}: ${r.error}` : `✓ ${toolName[r.tool]} started${r.branch ? ` on ${r.branch}` : ""}`}
+            <p key={i} className={`text-[12px] leading-snug ${r.error ? "text-bad" : "text-muted"}`}>
+              {r.error ? `✗ ${r.text}: ${r.error}` : `✓ ${toolName[r.tool]}: ${r.message ?? "started"}${r.branch ? ` · ${r.branch}` : ""}`}
             </p>
           ))}
+          {queue && (
+            <div className="flex items-center gap-2 border-t border-white/[0.06] pt-2.5">
+              <p className="min-w-0 flex-1 truncate text-[12px]">Next: <span className="text-fg">{queue.tasks[0].text}</span></p>
+              <button disabled={busy} className="btn btn-primary shrink-0 !py-1.5 text-[12px]" onClick={next}>
+                Copy & open {queue.tasks[0].dest.label}{queue.tasks.length > 1 ? ` (${queue.tasks.length} left)` : ""}
+              </button>
+            </div>
+          )}
         </section>
       )}
       {err && <p className="px-1 text-[12px] text-bad">{err}</p>}

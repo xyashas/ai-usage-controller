@@ -1,6 +1,6 @@
 // Bridge to the Rust core. Inside Tauri it calls commands; in a plain browser
 // (`npm run dev`) it serves a realistic mock so the panels can be designed fast.
-import type { Alert, Dest, DispatchPlan, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
+import type { Alert, Dest, DeviceCode, DispatchPlan, GithubStatus, Started, Detected, Diagnostics, HandoffOffer, HandoffPreviewData, Plan, Rect, RepoStatus, Settings, SetupResult, Snapshot, Tool } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -17,8 +17,14 @@ export const api = {
   previewRepoHandoff: (path: string, target: Tool) => call<HandoffPreviewData>("preview_repo_handoff", { path, target }),
   testHandoffOffers: () => call<HandoffOffer[]>("test_handoff_offers"),
   launchHandoff: (id: number, prompt: string, dest: Dest) => call<string>("launch_handoff", { id, prompt, dest }),
-  planDispatch: (text: string) => call<DispatchPlan>("plan_dispatch", { text }),
-  runDispatch: (repo: string, tasks: { text: string; tool: Tool }[], worktrees: boolean) => call<Started[]>("run_dispatch", { repo, tasks, worktrees }),
+  planDispatch: (text: string, repo: string | null) => call<DispatchPlan>("plan_dispatch", { text, repo }),
+  runDispatch: (repo: string, tasks: { text: string; tool: Tool; dest: Dest }[], worktrees: boolean) => call<Started[]>("run_dispatch", { repo, tasks, worktrees }),
+  githubStatus: () => call<GithubStatus>("github_status"),
+  githubConnect: (token?: string) => call<string>("github_connect", { token: token ?? null }),
+  githubDeviceStart: () => call<DeviceCode>("github_device_start"),
+  githubDevicePoll: (deviceCode: string) => call<string | null>("github_device_poll", { deviceCode }),
+  githubDisconnect: () => call<void>("github_disconnect"),
+  cloneRepo: (fullName: string) => call<string | null>("clone_repo", { fullName }),
   dismissAgent: (id: number) => call<void>("dismiss_agent", { id }),
   startDictation: () => call<void>("start_dictation"),
   listRepos: (fetch: boolean) => call<RepoStatus[]>("list_repos", { fetch }),
@@ -107,16 +113,18 @@ let mockSettings: Settings = {
   api_base: "https://api.aiusage.dev",
 };
 const dismissed = new Set<string>();
+let mockGithub: string | null = null;
 const mockAgents: Snapshot["agents"] = mockScenario === "empty" ? [] : [
-  { id: 3, tool: "codex", text: "Fix the failing checkout test", repo_name: "acme-web", branch: "agents/fix-failing-checkout-test", cwd: "", started_at: inMin(-6), state: "working", cost_usd: 0.42, requests: 18, last_activity_at: inMin(0) },
-  { id: 2, tool: "claude_code", text: "Update the docs for the new coupon API", repo_name: "acme-web", branch: "agents/update-docs-new-coupon-api", cwd: "", started_at: inMin(-6), state: "idle", cost_usd: 1.18, requests: 26, last_activity_at: inMin(-2) },
-  { id: 1, tool: "gemini", text: "Summarise open issues labelled bug", repo_name: "acme-api", branch: null, cwd: "", started_at: inMin(-1), state: "starting", cost_usd: 0, requests: 0, last_activity_at: null },
+  { id: 3, tool: "codex", text: "Fix the failing checkout test", repo_name: "acme-web", branch: "agents/fix-failing-checkout-test", cwd: "", started_at: inMin(-6), state: "working", dest: "terminal", cost_usd: 0.42, requests: 18, last_activity_at: inMin(0) },
+  { id: 2, tool: "claude_code", text: "Update the docs for the new coupon API", repo_name: "acme-web", branch: "agents/update-docs-new-coupon-api", cwd: "", started_at: inMin(-6), state: "idle", dest: "terminal", cost_usd: 1.18, requests: 26, last_activity_at: inMin(-2) },
+  { id: 1, tool: "gemini", text: "Summarise open issues labelled bug", repo_name: "acme-api", branch: null, cwd: "", started_at: inMin(-1), state: "opened", dest: "web", cost_usd: 0, requests: 0, last_activity_at: null },
 ];
 const mockRepos: RepoStatus[] = mockScenario === "empty" ? [] : [
-  { root: "/Users/you/dev/acme-web", name: "acme/web", set_up: true, current_branch: "main", github: "https://github.com/acme/web",
+  { id: "/Users/you/dev/acme-web", local: true, root: "/Users/you/dev/acme-web", name: "acme/web", set_up: true, current_branch: "main", github: "https://github.com/acme/web",
     latest: { branch: "claude/fix-login", updated_at: Date.now() / 1000 - 760, origin: "commit", content: "# Handoff" } },
-  { root: "/Users/you/dev/acme-api", name: "acme/api", set_up: false, current_branch: "main", github: "https://github.com/acme/api", latest: null },
+  { id: "/Users/you/dev/acme-api", local: true, root: "/Users/you/dev/acme-api", name: "acme/api", set_up: false, current_branch: "main", github: "https://github.com/acme/api", latest: null },
 ];
+const mockRemote: RepoStatus[] = ["acme/mobile", "acme/infra", "you/dotfiles"].map((n) => ({ id: `github:${n}`, local: false, root: "", name: n, set_up: false, current_branch: "main", github: `https://github.com/${n}`, latest: null }));
 
 function mockSnapshot(): Snapshot {
   const stamp = Date.now();
@@ -213,7 +221,7 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
       destinations: (args!.target as Tool) === "gemini" ? [{ dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }] : [{ dest: "app", label: (args!.target as Tool) === "codex" ? "Codex app" : "Claude app" }, { dest: "terminal", label: "Terminal" }, { dest: "web", label: "Web" }],
     };
     case "launch_handoff": return args!.dest === "terminal" ? "Codex is starting in a terminal." : "Prompt copied. Paste it into Codex in the Codex app.";
-    case "list_repos": return mockRepos;
+    case "list_repos": return mockGithub ? [...mockRepos, ...mockRemote] : mockRepos;
     case "plan_dispatch": {
       const rooms = [
         { tool: "claude_code", ready: true, used_pct: 64, active: true },
@@ -229,9 +237,17 @@ function mock(cmd: string, args?: Record<string, unknown>): unknown {
         const text = (m ? m[2] : p).replace(/^./, (c) => c.toUpperCase());
         return { text, tool, explicit: !!m, reason: m ? `You asked for ${tool === "claude_code" ? "Claude Code" : tool === "codex" ? "Codex" : "Gemini"}` : `Most room: ${tool === "gemini" ? 9 : 24}% used` };
       });
-      return { tasks, rooms };
+      const local = !String(args!.repo ?? "").startsWith("github:");
+      const app = (label: string) => [{ dest: "app", label }, ...(local ? [{ dest: "terminal", label: "Terminal" }] : []), { dest: "web", label: "Web" }];
+      return { tasks, rooms, dests: { claude_code: app("Claude app"), codex: app("ChatGPT app"), gemini: [...(local ? [{ dest: "terminal", label: "Terminal" }] : []), { dest: "web", label: "Web" }] } };
     }
-    case "run_dispatch": return (args!.tasks as { text: string; tool: Tool }[]).map((t) => ({ ...t, branch: args!.worktrees ? "agents/x" : "main", error: null }));
+    case "run_dispatch": return (args!.tasks as { text: string; tool: Tool; dest: Dest }[]).map((t) => ({ ...t, branch: args!.worktrees && t.dest !== "web" ? "agents/x" : null, message: t.dest === "terminal" ? "Started in a terminal" : t.dest === "app" ? "Copied. Paste it into a new session in the app" : "Copied. Paste it on the web", error: null }));
+    case "github_status": return { login: mockGithub, cli: !mockGithub, device_flow: true };
+    case "github_connect": mockGithub = "you"; return "you";
+    case "github_device_start": return { device_code: "d", user_code: "WDJB-MJHT", verification_uri: "https://github.com/login/device", interval: 5 };
+    case "github_device_poll": mockGithub = "you"; return "you";
+    case "github_disconnect": mockGithub = null; return null;
+    case "clone_repo": return null;
     case "dismiss_agent": dismissed.add(`agent:${args!.id}`); return null;
     case "setup_repo": { const r = mockRepos.find((x) => x.root === args!.path); if (r) r.set_up = true; return { root: args!.path, changed: [".aiuc/hook.mjs", "AGENTS.md", "CLAUDE.md", ".claude/settings.json"], committed: !!args!.commit }; }
     case "add_repo": return null;

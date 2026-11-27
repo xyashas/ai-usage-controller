@@ -236,7 +236,7 @@ export default function App() {
             ) : view === "agents" ? (
               <AgentsView snap={snap} onView={goto} refresh={refresh} />
             ) : view === "handoffs" ? (
-              <HandoffHub onView={goto} onHandoff={preview} onRepoHandoff={previewRepo} />
+              <HandoffHub onView={goto} onHandoff={(offer, target) => preview(offer, target, true)} onRepoHandoff={previewRepo} />
             ) : view === "onboarding" ? (
               <Onboarding
                 onDone={async () => {
