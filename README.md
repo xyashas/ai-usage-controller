@@ -20,6 +20,60 @@ A Mac and Windows widget that shows how much AI runway you have left, warns you 
 └──────────────────────────────────────────────┘
 ```
 
+## Hand work to another AI (local and cloud)
+
+When a limit gets close, carry the work to another tool with its context:
+the goal, latest requests, changed files, errors and what's left.
+
+**Where it opens.** Claude Code opens in the Claude desktop app (Code tab), and Codex
+in the Codex app, if installed. Otherwise they open on the web (claude.ai/code,
+chatgpt.com/codex). Gemini opens its CLI in a terminal. The preview's **Open in**
+switch also offers the terminal (for installed CLIs) and the web. The prompt is
+always copied to the clipboard; the terminal option also saves it as
+`.aiuc-handoff.md` (hidden from git through `.git/info/exclude`) and starts the CLI
+already reading it.
+
+**Local sessions.** At 90% of a 5-hour or weekly limit, or on a red alert, the panel
+offers your latest Claude Code or Codex session. The **Handoff** tab offers it any time.
+
+**Cloud sessions (and local ones, too).** The repo is the one place every agent shares,
+so the handoff lives there. In the Handoff tab, **Set up** a repo once. This adds
+`.aiuc/hook.mjs`, a short rule in `AGENTS.md` and `CLAUDE.md`, and a Claude Code hook.
+It can commit those changes; it never pushes.
+After every Claude Code turn, locally and in Claude Code on the web, the hook rewrites
+`.aiuc/handoff.md`. Codex and Gemini read it first and keep its Status current.
+The file travels with the branch.
+The widget fetches your repos, finds the newest handoff on any branch, and offers
+**Continue in Codex / Claude Code / Gemini**. A limit alert does the same when you
+were working in the cloud.
+
+The widget prepares handoffs locally and sends nothing to its API. The hook never uses
+the network and redacts things that look like keys before writing.
+
+## Run several agents at once
+
+Press **Alt+Shift+A** (⌥⇧A on a Mac) or open the **Agents** tab. Type or dictate
+something like *"Have Codex fix the failing checkout test, and Claude update the docs"*.
+The widget splits that into tasks and gives each to the tool you named, or to the tool
+with the most room left. With **Worktrees** on, each task runs on its own branch in a
+separate folder, so the agents don't edit the same files. Each task opens in its own
+terminal. The Agents list shows each task as working or waiting for you, with its
+cost so far. Task text stays on your computer.
+
+**Know when an agent needs you.** Turn on *agent status* (Agents tab or Settings) and
+Claude Code and Codex tell the widget when they finish or are waiting for you. When
+Claude Code asks to run a command, the panel opens with **Allow / Deny / In terminal**,
+so you can answer from the notch. This adds a hook to `~/.claude/settings.json` and
+`~/.codex/config.toml`; only the folder and the event are recorded.
+
+**Verified done.** When an agent finishes, the widget runs the project's tests in its
+folder (cargo, npm/pnpm/yarn/bun, go, pytest, `make test`, or the command in
+`.aiuc/verify`) and shows *Tests pass* or *Tests fail*, with the output a click away.
+
+**Queue for when the limit resets.** Give a task to a tool that's out of room and it's
+held until that limit resets, then sent automatically. Or send it now, or move it to
+the tool with the most room.
+
 ## What's in v1
 
 | # | Feature | Plan | Where |
@@ -96,7 +150,7 @@ npm test --prefix api          # 6 tests: tables, waitlist, full team flow, pers
 npm test --prefix web          # 10 tests: ccusage parsing and the waste recommendations
 ```
 
-CI runs the core tests on Linux, macOS and Windows and builds unsigned Mac (universal) and Windows installers on every push.
+CI runs the core tests on Linux and Windows and builds the unsigned Windows installer on every pull request. The Mac build (10× the Actions minutes) runs only on request: Actions → CI → Run workflow → tick "Build for Mac".
 
 ## How the numbers work
 

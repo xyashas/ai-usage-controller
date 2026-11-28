@@ -129,23 +129,26 @@ pub fn historical_peak_week(events: &[UsageEvent], now: DateTime<Utc>) -> Option
 
 pub fn week_start(t: DateTime<Utc>) -> DateTime<Utc> {
     let d = t.date_naive() - Duration::days(t.weekday().num_days_from_monday() as i64);
-    Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).unwrap())
+    d.and_hms_opt(0, 0, 0)
+        .map(|dt| Utc.from_utc_datetime(&dt))
+        .unwrap_or(t)
 }
 
 /// Gemini quotas reset at midnight Pacific time.
 pub fn gemini_day_bounds(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     let local = now.with_timezone(&Los_Angeles);
     let day = local.date_naive();
-    let start = Los_Angeles
-        .from_local_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
-        .earliest()
-        .unwrap()
-        .with_timezone(&Utc);
-    let next = Los_Angeles
-        .from_local_datetime(&(day + Duration::days(1)).and_hms_opt(0, 0, 0).unwrap())
-        .earliest()
-        .unwrap()
-        .with_timezone(&Utc);
+    let resolve = |d: chrono::NaiveDate, fallback: DateTime<Utc>| {
+        d.and_hms_opt(0, 0, 0)
+            .and_then(|dt| {
+                let res = Los_Angeles.from_local_datetime(&dt);
+                res.earliest().or_else(|| res.latest())
+            })
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or(fallback)
+    };
+    let start = resolve(day, now - Duration::hours(24));
+    let next = resolve(day + Duration::days(1), start + Duration::days(1));
     (start, next)
 }
 
@@ -228,9 +231,12 @@ pub fn minutes_to_cutoff(headroom_pct: f64, pct_per_min: f64) -> Option<f64> {
 pub fn local_day_bounds(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
     let local = now.with_timezone(&chrono::Local);
     let day = local.date_naive();
-    let start = chrono::Local
-        .from_local_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
-        .earliest()
+    let start = day
+        .and_hms_opt(0, 0, 0)
+        .and_then(|dt| {
+            let res = chrono::Local.from_local_datetime(&dt);
+            res.earliest().or_else(|| res.latest())
+        })
         .map(|d| d.with_timezone(&Utc))
         .unwrap_or(now - Duration::hours(24));
     (start, start + Duration::days(1))
@@ -238,10 +244,14 @@ pub fn local_day_bounds(now: DateTime<Utc>) -> (DateTime<Utc>, DateTime<Utc>) {
 
 pub fn month_start_local(now: DateTime<Utc>) -> DateTime<Utc> {
     let local = now.with_timezone(&chrono::Local);
-    let d = local.date_naive().with_day(1).unwrap();
-    chrono::Local
-        .from_local_datetime(&d.and_hms_opt(0, 0, 0).unwrap())
-        .earliest()
+    local
+        .date_naive()
+        .with_day(1)
+        .and_then(|d| d.and_hms_opt(0, 0, 0))
+        .and_then(|dt| {
+            let res = chrono::Local.from_local_datetime(&dt);
+            res.earliest().or_else(|| res.latest())
+        })
         .map(|d| d.with_timezone(&Utc))
         .unwrap_or(now - Duration::days(30))
 }

@@ -46,7 +46,7 @@ pub fn model_nudge(day_events: &[UsageEvent], prices: &PriceTable, day_key: &str
     let (from, acc) = groups
         .into_iter()
         .filter(|(_, a)| a.count >= NUDGE_MIN_COUNT && a.actual - a.alt >= NUDGE_MIN_SAVING_USD)
-        .max_by(|a, b| (a.1.actual - a.1.alt).partial_cmp(&(b.1.actual - b.1.alt)).unwrap())?;
+        .max_by(|a, b| (a.1.actual - a.1.alt).total_cmp(&(b.1.actual - b.1.alt)))?;
     let rule = prices.nudges.iter().find(|r| r.from == from)?;
     let saving = acc.actual - acc.alt;
     Some(Nudge {
@@ -158,7 +158,7 @@ pub fn audit(inp: &AuditInput) -> AuditResult {
             res.headline = format!(
                 "You hit your {} cap on {} days in one week. {} costs ${:.0} more and stops the cut-offs.",
                 inp.plan.name,
-                inp.cap_hit_days.iter().max().unwrap(),
+                inp.cap_hit_days.iter().copied().max().unwrap_or(0),
                 up.name,
                 up.price - inp.plan.price
             );
@@ -171,7 +171,7 @@ pub fn audit(inp: &AuditInput) -> AuditResult {
         .tiers
         .iter()
         .filter(|t| t.capacity < inp.plan.capacity && t.price < inp.plan.price)
-        .max_by(|a, b| a.capacity.partial_cmp(&b.capacity).unwrap());
+        .max_by(|a, b| a.capacity.total_cmp(&b.capacity));
     if let Some(lower) = lower {
         let full = inp.weekly_peaks.len() >= 4 && inp.weekly_peaks.iter().rev().take(4).all(|p| p.is_some());
         if full {

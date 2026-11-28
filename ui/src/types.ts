@@ -59,7 +59,14 @@ export interface AuditResult { tool: Tool; current_plan: string; current_price: 
 
 export interface Entitlements { tier: Tier; trial_ends_at: string | null; trial_available: boolean; licence_status: string | null; max_devices: number }
 
+export interface HandoffOffer { source: Tool; session: string; targets: Tool[] }
+export interface HandoffSession { source: Tool; session: string; project: string; cwd: string; title: string; updated_at: number; targets: Tool[] }
+
 export interface Snapshot {
+  agents: AgentRun[];
+  approvals: Approval[];
+  handoffs: HandoffOffer[];
+  gauge_history: { at: number; used: number; reset_at: number | null }[];
   idle_hidden: boolean;
   generated_at: string;
   onboarded: boolean;
@@ -75,6 +82,10 @@ export interface Snapshot {
   projected_saving_usd: number;
   locked: string[];
   remote: { today_cost_all_devices: number; month_cost_all_devices: number; devices: number } | null;
+  daily_recap: DailyRecap | null;
+  weekly_recap: WeeklyRecap;
+  suggestions: Suggestion[];
+  autopilot_moves: AutopilotMove[];
 }
 
 export interface Plan { id: string; name: string; price: number; capacity: number; metered?: boolean; daily_requests?: number | null }
@@ -91,6 +102,17 @@ export interface Settings {
   live_gauges: boolean;
   claude_web: boolean;
   api_base: string;
+  auto_send: boolean;
+  agent_status: boolean;
+  approvals: boolean;
+  verify_done: boolean;
+  ask_screenshots: boolean;
+  ask_memory: boolean;
+  show_daily_recap: boolean;
+  polish_auto: boolean;
+  suggest_chips: boolean;
+  autopilot: boolean;
+  ci_watch: boolean;
 }
 export interface Detected { tool: Tool; label: string; found: boolean; roots: string[] }
 export type Mode = "collapsed" | "expanded";
@@ -118,3 +140,132 @@ export interface Diagnostics {
   tools: ToolDiagnostics[];
 }
 export interface Rect { x: number; y: number; w: number; h: number }
+
+export type Dest = "app" | "terminal" | "web";
+export interface DestOption { dest: Dest; label: string }
+export interface HandoffPreviewData { id: number; prompt: string; destinations: DestOption[]; place: string }
+export interface RepoLatest { branch: string; updated_at: number; origin: "commit" | "working tree"; content: string }
+export interface RepoStatus { id: string; local: boolean; root: string; name: string; set_up: boolean; current_branch: string; github: string | null; latest: RepoLatest | null }
+export interface SetupResult { root: string; changed: string[]; committed: boolean }
+
+export type AgentState = "starting" | "working" | "idle" | "done" | "needs_approval" | "no_activity" | "opened" | "queued";
+export type VerifyState = "running" | "passed" | "failed" | "timed_out" | "error";
+export interface AgentRun {
+  id: number; tool: Tool; text: string; repo_name: string; branch: string | null; cwd: string; started_at: string; state: AgentState;
+  dest: Dest | null; cost_usd: number; requests: number; last_activity_at: string | null;
+  queued_until: string | null; verify: VerifyState | null; verify_secs: number | null; verify_at: string | null;
+}
+/** A tool call waiting for your OK. The summary is shown, never stored. */
+export interface Approval { id: string; tool: Tool; session: string; cwd: string; repo_name: string; tool_name: string; summary: string; at: string }
+export type ApprovalAnswer = "allow" | "deny" | "ask";
+export interface InstallResult { claude: boolean; codex: boolean; codex_busy: boolean }
+export interface Routed { text: string; tool: Tool | null; explicit: boolean; reason: string }
+export interface ToolRoom { tool: Tool; ready: boolean; used_pct: number | null; active: boolean; resets_at: string | null }
+export interface DispatchPlan { tasks: Routed[]; rooms: ToolRoom[]; dests: Record<Tool, DestOption[]> }
+export interface Started { text: string; tool: Tool; dest: Dest; branch: string | null; message: string | null; delivered: boolean; error: string | null }
+export interface GithubStatus { login: string | null; cli: boolean; device_flow: boolean }
+export interface DeviceCode { device_code: string; user_code: string; verification_uri: string; interval: number }
+
+export interface DailyToolUsage {
+  tool: Tool;
+  label: string;
+  requests: number;
+  cost_usd: number;
+  five_hour_peak_pct: number | null;
+  weekly_peak_pct: number | null;
+  five_hour_resets_at: string | null;
+  weekly_resets_at: string | null;
+}
+export interface DailyRecap {
+  date: string;
+  tools: DailyToolUsage[];
+  open_tasks_yesterday: number;
+  suggestion: string;
+}
+export interface WeeklyToolComparison {
+  tool: Tool;
+  label: string;
+  this_week_requests: number;
+  last_week_requests: number;
+  this_week_cost_usd: number;
+  last_week_cost_usd: number;
+  change_pct: number | null;
+  five_hour_hits: number;
+  weekly_hits: number;
+}
+export interface HourBucket { hour: number; requests: number }
+export interface WeeklyRecap {
+  tools: WeeklyToolComparison[];
+  busiest_hours: HourBucket[];
+  hourly_requests: number[];
+  handoffs_count: number;
+  total_limit_hits: number;
+}
+
+// ---------- Ask the notch ----------
+export type AskAction = "ask" | "explain" | "fix" | "find_bug" | "rewrite" | "shorter" | "professional" | "translate" | "reply" | "summarize" | "point";
+export type AskMode = "quick" | "deep";
+export interface AskPick { tool: Tool; reason: string }
+export interface AskContext {
+  window: string | null; app: string | null; selection: string | null; clipboard: string | null; clipboard_image: boolean;
+  screenshot: string | null; repo: string | null; pick: AskPick | null; installed: Tool[];
+}
+export interface AskTurn { question: string; answer: string }
+export interface AskPoint { x: number; y: number; label: string }
+export interface AskDone { id: string; tool: Tool | null; reason: string; error: string | null; points: AskPoint[]; text: string; opened_web: boolean }
+export interface AskRequest { id: string; question: string; action: AskAction; mode: AskMode; tool: Tool | null; history: AskTurn[]; council: boolean }
+export type WatchCondition =
+  | { kind: "limit_reset"; tool: Tool }
+  | { kind: "limit_below"; tool: Tool; used_pct: number }
+  | { kind: "agent_done"; task_id: number }
+  | { kind: "agent_needs_you"; task_id: number | null }
+  | { kind: "tests_pass"; task_id: number }
+  | { kind: "at"; at: string };
+export interface Watch { id: string; condition: WatchCondition; label: string; created_at: string }
+
+export type SuggestionKind =
+  | { kind: "copied_error" }
+  | { kind: "tests_failed"; task_id: number }
+  | { kind: "limit_mid_task"; tool: Tool; to: Tool };
+export interface Suggestion {
+  id: string;
+  kind: SuggestionKind;
+  title: string;
+  detail: string;
+  action: "ask_fix" | "send_failure" | "handoff";
+  text?: string | null;
+}
+
+export interface AutopilotMove { task_id: number; to: Tool; at: string }
+export interface CiRun {
+  id: number;
+  repo: string;
+  branch: string;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  html_url: string;
+  updated_at: string;
+}
+
+export type InboxSource = "voice" | "selection" | "clipboard" | "ask";
+export interface InboxItem {
+  id: number;
+  text: string;
+  source: InboxSource;
+  app: string | null;
+  at: string;
+  remind_at: string | null;
+  done: boolean;
+}
+
+// ---------- the on-screen buddy ----------
+export interface BuddySpot { fx: number; fy: number; label: string }
+export interface BuddyState {
+  mode: "starting" | "listening" | "thinking" | "answer" | "guide" | "done" | "error" | "hide";
+  said: string; text: string; cursor: [number, number]; spots: BuddySpot[]; step: number; id: string; speak: string;
+}
+export interface VoiceTurn { question: string; answer: string; tool: Tool | null; reason: string }
+
+/** Something you asked Ask to remember about you. Stored only on this computer. */
+export interface Pref { id: number; text: string; at: string }

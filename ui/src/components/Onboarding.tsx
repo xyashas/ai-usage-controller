@@ -1,3 +1,4 @@
+import { ToolMark } from "./ToolMark";
 import { useEffect, useState } from "react";
 import type { Detected, Plan, Settings, Tool } from "../types";
 import { api } from "../api";
@@ -19,7 +20,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     });
   }, []);
 
-  if (!settings || !plans) return <Shell><p className="text-white/50">Looking for your AI tools…</p></Shell>;
+  if (!settings || !plans) return <Shell><p className="text-muted">Looking for your AI tools…</p></Shell>;
   const tools = found.filter((d) => d.found);
 
   const setPlan = (tool: Tool, plan_id: string) =>
@@ -39,38 +40,38 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     <Shell>
       {error && <p role="alert" className="text-xs text-bad">{error}</p>}
       <div className="flex gap-1">
-        {[0, 1, 2].map((i) => <div key={i} className={`h-1 flex-1 rounded-full ${i <= step ? "bg-accent" : "bg-white/10"}`} />)}
+        {[0, 1, 2].map((i) => <div key={i} className={`h-1 flex-1 rounded-full ${i <= step ? "bg-white" : "bg-white/10"}`} />)}
       </div>
 
       {step === 0 && (
         <>
-          <h2 className="text-[18px] font-semibold">Found on this {navigator.userAgent.includes("Mac") ? "Mac" : navigator.userAgent.includes("Windows") ? "PC" : "computer"}</h2>
+          <h2 className="text-[17px] font-semibold tracking-tight">Found on this {navigator.userAgent.includes("Mac") ? "Mac" : navigator.userAgent.includes("Windows") ? "PC" : "computer"}</h2>
           <div className="space-y-2">
             {found.map((d) => (
-              <div key={d.tool} className="flex items-center justify-between rounded-xl bg-white/[0.04] px-3 py-2.5">
-                <span className="text-[13.5px]">{d.label}</span>
-                <span className={`text-[12px] ${d.found ? "text-ok" : "text-white/40"}`}>{d.found ? "✓ found" : d.tool === "claude_code" ? "no Claude Code logs" : "not installed"}</span>
+              <div key={d.tool} className="flex items-center justify-between rounded-2xl bg-[#141416] px-3.5 py-3">
+                <span className="flex items-center gap-2 text-[13.5px]"><ToolMark tool={d.tool} />{d.label}</span>
+                <span className={`text-[12px] ${d.found ? "text-ok" : "text-muted"}`}>{d.found ? "✓ found" : d.tool === "claude_code" ? "no Claude Code logs" : "not installed"}</span>
               </div>
             ))}
           </div>
           <p className="text-[12px] font-medium">Use claude.ai or the Claude desktop app?</p>
           <ClaudeConnect />
-          <p className="text-[11.5px] text-white/45">We read usage counts from local logs. Prompts and code never leave your machine.</p>
-          <button onClick={() => setStep(1)} className="rounded-full bg-white py-2.5 text-[13.5px] font-semibold text-black hover:bg-white/90">Continue</button>
+          <p className="text-[11.5px] text-muted">We read usage counts from local logs. Prompts and code never leave your machine.</p>
+          <button onClick={() => setStep(1)} className="btn btn-primary w-full !py-2.5 text-[13px]">Continue</button>
         </>
       )}
 
       {step === 1 && (
         <>
-          <h2 className="text-[18px] font-semibold">Which plan are you on?</h2>
-          <div className="space-y-3 overflow-y-auto">
+          <h2 className="text-[17px] font-semibold tracking-tight">Which plan are you on?</h2>
+          <div className="space-y-4 overflow-y-auto">
             {found.filter((d) => d.found || d.tool === "claude_code").map((d) => (
               <label key={d.tool} className="block space-y-1">
-                <span className="text-[12px] text-white/50">{d.label}</span>
+                <span className="text-[12px] text-muted">{d.label}</span>
                 <select onFocus={() => api.focus()}
                   value={settings.tools[d.tool]?.plan_id ?? ""}
                   onChange={(e) => setPlan(d.tool, e.target.value)}
-                  className="w-full rounded-lg bg-white/[0.06] px-3 py-2 text-[13px] outline-none ring-1 ring-white/[0.08] focus:ring-accent"
+                  className="field"
                 >
                   <option value="">Not sure</option>
                   {plans[d.tool].map((p) => (
@@ -80,13 +81,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               </label>
             ))}
           </div>
-          <button onClick={() => setStep(2)} className="rounded-full bg-white py-2.5 text-[13.5px] font-semibold text-black hover:bg-white/90">Continue</button>
+          <button onClick={() => setStep(2)} className="btn btn-primary w-full !py-2.5 text-[13px]">Continue</button>
         </>
       )}
 
       {step === 2 && (
         <>
-          <h2 className="text-[18px] font-semibold">When should we warn you?</h2>
+          <h2 className="text-[17px] font-semibold tracking-tight">When should we warn you?</h2>
           <div className="space-y-2">
             {[
               { label: "Balanced", amber: 20, red: 5, hint: "Amber at 80% used, red at 95%" },
@@ -98,16 +99,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 <button
                   key={o.label}
                   onClick={() => setSettings({ ...settings, alerts: { ...settings.alerts, amber_pct: o.amber, red_pct: o.red } })}
-                  className={`w-full rounded-xl px-3 py-2.5 text-left ring-1 ${on ? "bg-accent/15 ring-accent" : "bg-white/[0.04] ring-white/[0.08]"}`}
+                  className={`w-full rounded-2xl px-3.5 py-3 text-left ring-1 ${on ? "bg-white/[0.12] ring-white/40" : "bg-[#141416] ring-white/[0.06]"}`}
                 >
                   <div className="text-[13.5px] font-medium">{o.label}</div>
-                  <div className="text-[11.5px] text-white/50">{o.hint}</div>
+                  <div className="text-[11.5px] text-muted">{o.hint}</div>
                 </button>
               );
             })}
           </div>
-          <p className="text-[11.5px] text-white/50">Custom levels are part of Pro; Free uses Balanced.</p>
-          <button onClick={finish} className="rounded-full bg-white py-2.5 text-[13.5px] font-semibold text-black hover:bg-white/90">Done</button>
+          <p className="text-[11.5px] text-muted">Custom levels are part of Pro; Free uses Balanced.</p>
+          <button onClick={finish} className="btn btn-primary w-full !py-2.5 text-[13px]">Done</button>
         </>
       )}
     </Shell>
@@ -115,5 +116,5 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-col gap-4 p-5">{children}</div>;
+  return <div className="flex flex-col gap-3 p-3">{children}</div>;
 }

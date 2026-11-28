@@ -1,22 +1,28 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Snapshot } from "./types";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { HandoffPreview, type Draft } from "./components/HandoffPreview";
+import type { HandoffOffer, RepoStatus, Tool, Snapshot } from "./types";
+import { HandoffHub } from "./components/HandoffHub";
+import { AgentsView } from "./components/AgentsView";
+import { AskView, askSessionActive } from "./components/AskView";
 import { api, inTauri, onHover, onOpenView, onSnapshot, onToggle } from "./api";
 import { Collapsed } from "./components/Collapsed";
 import { Expanded } from "./components/Expanded";
-import { Paywall } from "./components/Paywall";
-import { AuditCard } from "./components/AuditCard";
 import { SettingsView } from "./components/SettingsView";
-import { Onboarding } from "./components/Onboarding";
-import { CheckSetup } from "./components/CheckSetup";
+import { Inbox } from "./components/Inbox";
+const Paywall = lazy(() => import("./components/Paywall").then((m) => ({ default: m.Paywall })));
+const AuditCard = lazy(() => import("./components/AuditCard").then((m) => ({ default: m.AuditCard })));
+const Onboarding = lazy(() => import("./components/Onboarding").then((m) => ({ default: m.Onboarding })));
+const CheckSetup = lazy(() => import("./components/CheckSetup").then((m) => ({ default: m.CheckSetup })));
+import { SuggestionChip } from "./components/SuggestionChip";
 
-export type View = "panel" | "settings" | "paywall" | "audit" | "onboarding" | "setup";
+export type View = "panel" | "ask" | "agents" | "handoffs" | "inbox" | "settings" | "paywall" | "audit" | "onboarding" | "setup" | "handoff";
 type Platform = "macos" | "windows" | "linux";
 
-const PANEL_W = 360;
-const MAX_H = 560;
+const PANEL_W = 520;
+const MAX_H = 640;
 const OPEN_DELAY = 140; // hover this long before the panel opens (stops drive-by opens)
 const CLOSE_DELAY = 260; // grace period after the cursor leaves
-const ANIM_MS = 380;
+const ANIM_MS = 420;
 
 function pillSize(platform: Platform, notch: number) {
   if (platform === "macos" && notch > 0) return { w: 236, h: notch + 22, top: 0 };
@@ -28,14 +34,20 @@ export default function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [open, setOpenState] = useState(false);
   const [mounted, setMounted] = useState(false); // panel content stays mounted while closing
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [view, setView] = useState<View>("panel");
   const [platform, setPlatform] = useState<Platform>("windows");
   const [notch, setNotch] = useState(0);
   const [contentH, setContentH] = useState(320);
+  // Text handed to the Agents task box (from Ask), and an ask started elsewhere.
+  const [prefill, setPrefill] = useState<string | null>(null);
+  const [askInit, setAskInit] = useState<{ text: string; action: string } | null>(null);
+  const [askKey, setAskKey] = useState(0);
 
   const openRef = useRef(false);
   const hoverRef = useRef(false); // cursor is over the widget's shape
   const viewRef = useRef<View>("panel");
+  const backTo = useRef<View>("panel"); // where a handoff preview returns to
   const hoverTimer = useRef<number | undefined>(undefined);
   const unmountTimer = useRef<number | undefined>(undefined);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -56,7 +68,9 @@ export default function App() {
         // Keep onboarding mounted so a half-finished setup isn't lost.
         if (viewRef.current !== "onboarding") setMounted(false);
         // Back to the main panel next time, unless setup isn't finished.
-        setView((v) => (v === "onboarding" ? v : "panel"));
+        setDraft(null);
+        // An Ask conversation in progress (or just now) reopens where you left it.
+        setView((v) => (v === "onboarding" || (v === "ask" && askSessionActive()) ? v : "panel"));
       }, ANIM_MS);
     }
     setOpenState(next);
@@ -85,8 +99,10 @@ export default function App() {
     const subs = [
       onSnapshot(setSnap),
       onHover(onHoverChange),
-      onToggle(() => setOpen(!openRef.current)),
+      onToggle(() => { clearTimeout(hoverTimer.current); setOpen(!openRef.current); }),
       onOpenView((v) => {
+        // Each hotkey press is a fresh ask with what's on screen now.
+        if (v === "ask") { setAskInit(null); setAskKey((k) => k + 1); }
         setView(v as View);
         setOpen(true);
       }),
@@ -100,15 +116,47 @@ export default function App() {
       clearTimeout(hoverTimer.current);
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (viewRef.current !== "panel" && viewRef.current !== "onboarding") {
+          setDraft(null);
+          setView("panel");
+          return;
+        }
+        setOpen(false);
+        requestAnimationFrame(() => surfaceRef.current?.querySelector<HTMLButtonElement>(".pill-layer button")?.focus({ preventScroll: true }));
+      }
+    };
+    // Suggestion chips (and anything else) can start an ask.
+    const onAskEvent = (e: Event) => {
+      const d = (e as CustomEvent<{ text?: string; action?: string }>).detail ?? {};
+      if (d.action === "handoff") { setView("handoffs"); setOpen(true); return; }
+      if (d.action === "send_failure") { setPrefill(`Fix the failing tests:\n\n${d.text ?? ""}`); setView("agents"); setOpen(true); return; }
+      if (d.action === "make_task") { setPrefill(d.text ?? ""); setView("agents"); setOpen(true); return; }
+      setAskInit({ text: d.text ?? "", action: d.action ?? "ask" });
+      setAskKey((k) => k + 1);
+      setView("ask");
+      setOpen(true);
+    };
+    window.addEventListener("aiuc-ask", onAskEvent);
     window.addEventListener("blur", onBlur);
     window.addEventListener("keydown", onKey);
     return () => {
       subs.forEach((p) => p.then((u) => u()));
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("aiuc-ask", onAskEvent);
       window.removeEventListener("keydown", onKey);
     };
   }, [refresh, onHoverChange, setOpen]);
+
+  useEffect(() => {
+    if (open && mounted) {
+      contentRef.current?.scrollTo(0, 0);
+      if (document.hasFocus() && document.activeElement?.matches("body, .pill-layer button")) {
+        contentRef.current?.focus({ preventScroll: true });
+      }
+    }
+  }, [open, view, mounted]);
 
   // First run: open straight into onboarding.
   useEffect(() => {
@@ -117,6 +165,14 @@ export default function App() {
       setOpen(true);
     }
   }, [snap, view, setOpen]);
+
+  // A tool asking for your OK pops the panel open, once per request.
+  const seenApprovals = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = snap?.approvals.filter((a) => !seenApprovals.current.has(a.id)) ?? [];
+    fresh.forEach((a) => seenApprovals.current.add(a.id));
+    if (fresh.length && !openRef.current) setOpen(true);
+  }, [snap, setOpen]);
 
   // A red alert pops the panel open once.
   const lastAlert = useRef<string | null>(null);
@@ -134,12 +190,16 @@ export default function App() {
   useLayoutEffect(() => {
     const el = innerRef.current;
     if (!mounted || !el) return;
-    const measure = () => setContentH(Math.min(MAX_H, Math.ceil(el.getBoundingClientRect().height)));
+    const measure = () => {
+      // Async views briefly have no content. Keep the previous surface until the new view is ready.
+      if (!el.firstElementChild) return;
+      setContentH(Math.min(MAX_H, Math.ceil(el.getBoundingClientRect().height)));
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [mounted]);
+  }, [mounted, view]);
 
   // Tell the native side which area takes the mouse (everything else clicks
   // through). Uses the shape's target size rather than measuring mid-animation,
@@ -161,7 +221,7 @@ export default function App() {
   const pill = pillSize(platform, notch);
   const mac = platform === "macos";
   const height = open ? contentH : pill.h;
-  const radius = open ? (mac ? "0 0 28px 28px" : "24px") : mac ? `0 0 ${Math.min(16, pill.h / 2)}px ${Math.min(16, pill.h / 2)}px` : `${pill.h / 2}px`;
+  const radius = open ? (mac ? "0 0 30px 30px" : "28px") : mac ? `0 0 ${Math.min(16, pill.h / 2)}px ${Math.min(16, pill.h / 2)}px` : `${pill.h / 2}px`;
   const alert = snap.alerts[0];
 
   const goto = (v: View) => {
@@ -169,28 +229,56 @@ export default function App() {
     if (v !== "panel") api.focus();
   };
 
+  function preview(offer: HandoffOffer, target: Tool, test = false) {
+    backTo.current = viewRef.current;
+    const request = api.previewHandoff(offer.source, offer.session, target, test);
+    setDraft({ source: offer.source, target, preview: request });
+    goto("handoff");
+  }
+
+  function previewRepo(repo: RepoStatus, target: Tool) {
+    backTo.current = viewRef.current;
+    setDraft({ target, preview: api.previewRepoHandoff(repo.root, target) });
+    goto("handoff");
+  }
+
   return (
     <div className="relative h-full w-full">
       <div
         ref={surfaceRef}
         onMouseEnter={inTauri ? undefined : () => onHoverChange(true)}
         onMouseLeave={inTauri ? undefined : () => onHoverChange(false)}
-        className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && alert ? (alert.level === "red" ? "pulse-red" : "glow-amber") : ""}`}
+        className={`surface absolute left-1/2 overflow-hidden ${open ? "is-open" : ""} ${!open && snap.approvals.length ? "pulse-amber" : !open && alert?.level === "red" ? "pulse-red" : ""} ${!open && mac && notch ? "notch-pill" : ""}`}
         aria-hidden={hidden}
         inert={hidden}
         style={{ opacity: hidden ? 0 : 1, pointerEvents: hidden ? "none" : undefined, top: pill.top, width: open ? PANEL_W : pill.w, height, borderRadius: radius, transform: "translateX(-50%)" }}
       >
-        <div className="pill-layer absolute inset-x-0 bottom-0" style={{ height: mac && notch ? 22 : pill.h, opacity: open ? 0 : 1 }}>
-          <Collapsed snap={snap} onOpen={() => setOpen(true)} />
+        <div inert={open} className="pill-layer absolute inset-x-0 bottom-0" style={{ height: mac && notch ? 22 : pill.h, opacity: open ? 0 : 1 }}>
+          <Collapsed notch={mac && notch > 0} snap={snap} onOpen={() => setOpen(true)} />
         </div>
         {mounted && (
           <div
+            tabIndex={-1}
+            role="region"
+            aria-label={view === "panel" ? "Usage panel" : view}
+            inert={!open}
             ref={contentRef}
             className="panel-layer absolute left-0 top-0 overflow-y-auto"
             style={{ width: PANEL_W, maxHeight: MAX_H, opacity: open ? 1 : 0 }}
           >
             <div ref={innerRef} style={{ paddingTop: mac ? notch : 0 }}>
-            {view === "onboarding" ? (
+            <Suspense fallback={null}>
+            {view === "handoff" && draft ? (
+              <HandoffPreview draft={draft} onBack={() => { setDraft(null); setView(backTo.current === "handoff" ? "panel" : backTo.current); }} />
+            ) : view === "ask" ? (
+              <AskView key={askKey} init={askInit} onView={goto} onTask={(t) => { setPrefill(t); goto("agents"); }} />
+            ) : view === "agents" ? (
+              <AgentsView snap={snap} onView={goto} refresh={refresh} prefill={prefill} onPrefilled={() => setPrefill(null)} />
+            ) : view === "handoffs" ? (
+              <HandoffHub onView={goto} onHandoff={(offer, target) => preview(offer, target, true)} onRepoHandoff={previewRepo} />
+            ) : view === "inbox" ? (
+              <Inbox onView={goto} onTask={(t) => { setPrefill(t); goto("agents"); }} />
+            ) : view === "onboarding" ? (
               <Onboarding
                 onDone={async () => {
                   await refresh();
@@ -204,14 +292,16 @@ export default function App() {
             ) : view === "audit" ? (
               <AuditCard snap={snap} onBack={() => setView("panel")} refresh={refresh} />
             ) : view === "setup" ? (
-              <CheckSetup onBack={() => setView("panel")} />
+              <CheckSetup onBack={() => setView("panel")} onTestHandoff={(offer, target) => preview(offer, target, true)} />
             ) : (
-              <Expanded snap={snap} onView={goto} refresh={refresh} />
+              <Expanded onHandoff={preview} onRepoHandoff={previewRepo} snap={snap} onView={goto} refresh={refresh} />
             )}
+            </Suspense>
             </div>
           </div>
         )}
       </div>
+      <SuggestionChip snap={snap} open={open} top={pill.top + pill.h + 8} />
     </div>
   );
 }

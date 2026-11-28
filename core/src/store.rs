@@ -33,6 +33,7 @@ fn from_ms(v: i64) -> DateTime<Utc> {
 
 const SCHEMA: &str = r#"
 PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
 CREATE TABLE IF NOT EXISTS events (
   dedup_key   TEXT PRIMARY KEY,
   tool        TEXT NOT NULL,
@@ -52,19 +53,40 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_tool_ts ON events(tool, ts);
 CREATE INDEX IF NOT EXISTS events_session ON events(session_id, ts);
 CREATE INDEX IF NOT EXISTS events_synced ON events(synced);
+CREATE INDEX IF NOT EXISTS events_kind_ts ON events(kind, ts);
 CREATE TABLE IF NOT EXISTS gauges (
   tool TEXT NOT NULL, window TEXT NOT NULL, ts INTEGER NOT NULL,
   used_pct REAL NOT NULL, resets_at INTEGER, window_minutes INTEGER, source TEXT NOT NULL,
   PRIMARY KEY (tool, window, ts)
 );
+CREATE INDEX IF NOT EXISTS gauges_ts ON gauges(ts);
 CREATE TABLE IF NOT EXISTS cursors (
   path TEXT PRIMARY KEY, offset INTEGER NOT NULL, size INTEGER NOT NULL, mtime INTEGER NOT NULL, ctx TEXT
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- Tasks started from the dispatcher: the local outcomes ledger. Task text is
+-- kept on this machine only (never synced), like the handoff file.
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, repo TEXT NOT NULL,
+  cwd TEXT NOT NULL, branch TEXT, tool TEXT NOT NULL, text TEXT NOT NULL,
+  dismissed INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS savings (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, amount REAL NOT NULL, note TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS savings_ts ON savings(ts);
 "#;
+
+/// Columns added after a table first shipped. Errors mean "already there".
+fn migrate(conn: &Connection) {
+    for col in ["dest TEXT", "queued_until INTEGER", "worktree INTEGER NOT NULL DEFAULT 0", "verify TEXT", "verify_at INTEGER", "verify_secs REAL"] {
+        let _ = conn.execute(&format!("ALTER TABLE tasks ADD COLUMN {col}"), []);
+    }
+    let _ = conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS tasks_open_created ON tasks(dismissed, created_at);
+         CREATE INDEX IF NOT EXISTS tasks_queued ON tasks(dismissed, queued_until);",
+    );
+}
 
 impl Store {
     pub fn open(path: &Path) -> Result<Store> {
@@ -73,12 +95,39 @@ impl Store {
         }
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn);
         Ok(Store { conn })
+    }
+
+    /// Open the database, verifying integrity. If the file is corrupt, back it
+    /// up alongside its WAL/SHM files and start fresh (returns `recovered = true`).
+    pub fn open_or_recover(path: &Path) -> Result<(Store, bool)> {
+        if let Ok(store) = Self::open(path) {
+            let ok = store
+                .conn
+                .query_row("PRAGMA quick_check(1)", [], |r| r.get::<_, String>(0))
+                .map(|s| s.eq_ignore_ascii_case("ok"))
+                .unwrap_or(false);
+            if ok {
+                return Ok((store, false));
+            }
+        }
+        let stamp = Utc::now().timestamp();
+        for suffix in ["", "-wal", "-shm"] {
+            let src = std::path::PathBuf::from(format!("{}{}", path.display(), suffix));
+            if src.exists() {
+                let dst = std::path::PathBuf::from(format!("{}.corrupt.{}{}", path.display(), stamp, suffix));
+                let _ = std::fs::rename(&src, &dst);
+            }
+        }
+        let fresh = Self::open(path)?;
+        Ok((fresh, true))
     }
 
     pub fn open_in_memory() -> Result<Store> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn);
         Ok(Store { conn })
     }
 
@@ -320,6 +369,78 @@ impl Store {
         Ok(())
     }
 
+    pub fn insert_task(&self, t: &TaskRow) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO tasks (created_at, repo, cwd, branch, tool, text, dest, queued_until, worktree) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![ms(t.created_at), t.repo, t.cwd, t.branch, t.tool.as_str(), t.text, t.dest, t.queued_until.map(ms), t.worktree],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Tasks started (or queued) since `from` that weren't dismissed, newest first.
+    pub fn tasks_since(&self, from: DateTime<Utc>) -> Result<Vec<TaskRow>> {
+        self.tasks_where("created_at >= ?1 AND dismissed = 0", ms(from))
+    }
+
+    /// Queued tasks whose time has come.
+    pub fn queued_due(&self, now: DateTime<Utc>) -> Result<Vec<TaskRow>> {
+        self.tasks_where("queued_until IS NOT NULL AND queued_until <= ?1 AND dismissed = 0", ms(now))
+    }
+
+    pub fn task(&self, id: i64) -> Result<Option<TaskRow>> {
+        Ok(self.tasks_where("id = ?1", id)?.into_iter().next())
+    }
+
+    fn tasks_where(&self, cond: &str, arg: i64) -> Result<Vec<TaskRow>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, created_at, repo, cwd, branch, tool, text, dest, queued_until, worktree, verify, verify_at, verify_secs FROM tasks WHERE {cond} ORDER BY created_at DESC, id DESC"
+        ))?;
+        let rows = stmt.query_map(params![arg], |r| {
+            let tool: String = r.get(5)?;
+            Ok(TaskRow {
+                id: r.get(0)?,
+                created_at: from_ms(r.get(1)?),
+                repo: r.get(2)?,
+                cwd: r.get(3)?,
+                branch: r.get(4)?,
+                tool: Tool::parse(&tool).unwrap_or(Tool::ClaudeCode),
+                text: r.get(6)?,
+                dest: r.get(7)?,
+                queued_until: r.get::<_, Option<i64>>(8)?.map(from_ms),
+                worktree: r.get::<_, Option<bool>>(9)?.unwrap_or(false),
+                verify: r.get(10)?,
+                verify_at: r.get::<_, Option<i64>>(11)?.map(from_ms),
+                verify_secs: r.get(12)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// A queued task was sent: it starts now, in `cwd`.
+    pub fn start_queued(&self, id: i64, now: DateTime<Utc>, tool: Tool, cwd: &str, branch: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tasks SET queued_until = NULL, created_at = ?2, tool = ?3, cwd = ?4, branch = ?5 WHERE id = ?1",
+            params![id, ms(now), tool.as_str(), cwd, branch],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_task_dest(&self, id: i64, dest: Option<&str>) -> Result<()> {
+        self.conn.execute("UPDATE tasks SET dest = ?2 WHERE id = ?1", params![id, dest])?;
+        Ok(())
+    }
+
+    /// Record a test run: "running", "passed", "failed", "timed_out" or "error".
+    pub fn set_verify(&self, id: i64, status: &str, at: DateTime<Utc>, secs: Option<f64>) -> Result<()> {
+        self.conn.execute("UPDATE tasks SET verify = ?2, verify_at = ?3, verify_secs = ?4 WHERE id = ?1", params![id, status, ms(at), secs])?;
+        Ok(())
+    }
+
+    pub fn dismiss_task(&self, id: i64) -> Result<()> {
+        self.conn.execute("UPDATE tasks SET dismissed = 1 WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     pub fn add_saving(&self, ts: DateTime<Utc>, kind: &str, amount: f64, note: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO savings (ts, kind, amount, note) VALUES (?1,?2,?3,?4)",
@@ -336,5 +457,33 @@ impl Store {
             Ok(SavingsEntry { ts: from_ms(r.get(0)?), kind: r.get(1)?, amount_usd: r.get(2)?, note: r.get(3)? })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
+/// A task started from the dispatcher.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskRow {
+    pub id: i64,
+    pub created_at: DateTime<Utc>,
+    pub repo: String,
+    pub cwd: String,
+    pub branch: Option<String>,
+    pub tool: Tool,
+    pub text: String,
+    /// "terminal", "app" or "web".
+    pub dest: Option<String>,
+    /// Waiting for this tool's limit to reset; sent then.
+    pub queued_until: Option<DateTime<Utc>>,
+    /// Run in its own worktree (used when a queued task is sent).
+    pub worktree: bool,
+    /// Last test run: "running", "passed", "failed", "timed_out" or "error".
+    pub verify: Option<String>,
+    pub verify_at: Option<DateTime<Utc>>,
+    pub verify_secs: Option<f64>,
+}
+
+impl TaskRow {
+    pub fn new(repo: String, cwd: String, branch: Option<String>, tool: Tool, text: String, dest: Option<String>) -> TaskRow {
+        TaskRow { id: 0, created_at: Utc::now(), repo, cwd, branch, tool, text, dest, queued_until: None, worktree: false, verify: None, verify_at: None, verify_secs: None }
     }
 }

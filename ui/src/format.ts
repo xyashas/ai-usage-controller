@@ -43,7 +43,7 @@ export const barColor: Record<Color, string> = {
   green: "bg-ok",
   amber: "bg-warn",
   red: "bg-bad",
-  grey: "bg-white/25",
+  grey: "bg-fg/25",
 };
 
 export const textColor: Record<Color, string> = {

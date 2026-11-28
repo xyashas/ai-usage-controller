@@ -40,7 +40,7 @@ impl PlanTable {
     /// Subscription tiers (non-metered) sorted by capacity ascending.
     pub fn tiers(&self, tool: Tool) -> Vec<&Plan> {
         let mut v: Vec<&Plan> = self.plans(tool).iter().filter(|p| !p.metered && p.price > 0.0).collect();
-        v.sort_by(|a, b| a.capacity.partial_cmp(&b.capacity).unwrap().then(a.price.partial_cmp(&b.price).unwrap()));
+        v.sort_by(|a, b| a.capacity.total_cmp(&b.capacity).then(a.price.total_cmp(&b.price)));
         v
     }
 }

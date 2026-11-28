@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Mac jobs cost 10x the minutes of Linux/Windows, so they only run when asked:
+  # Actions → CI → Run workflow → tick "Build for Mac".
+  workflow_dispatch:
+    inputs:
+      mac:
+        description: Build for Mac
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -24,25 +32,11 @@ jobs:
       - run: cargo test -p aiuc-core
 
   desktop:
-    name: Desktop app build (${{ matrix.name }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS universal
-            os: macos-latest
-            args: --target universal-apple-darwin
-            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
-          - name: Windows x64
-            os: windows-latest
-            args: ""
-            rust_targets: ""
-    runs-on: ${{ matrix.os }}
+    name: Desktop app build (Windows x64)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_targets }}
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
@@ -51,14 +45,38 @@ jobs:
       - run: npm ci --prefix app
       - name: Build unsigned bundles
         working-directory: app
-        run: npx tauri build ${{ matrix.args }}
+        run: npx tauri build
       - uses: actions/upload-artifact@v4
         with:
-          name: bundles-${{ matrix.os }}
+          name: bundles-windows-latest
           path: |
-            target/**/release/bundle/dmg/*.dmg
             target/**/release/bundle/nsis/*.exe
             target/**/release/bundle/msi/*.msi
+          if-no-files-found: warn
+
+  desktop-mac:
+    name: Desktop app build (macOS universal)
+    if: github.event_name == 'workflow_dispatch' && inputs.mac
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p aiuc-core
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --prefix ui
+      - run: npm ci --prefix app
+      - name: Build unsigned bundles
+        working-directory: app
+        run: npx tauri build --target universal-apple-darwin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-macos-latest
+          path: target/**/release/bundle/dmg/*.dmg
           if-no-files-found: warn
 
   desktop-linux-check:
@@ -74,6 +92,7 @@ jobs:
           node-version: 22
       - run: npm ci --prefix ui && npm run build --prefix ui
       - run: cargo check -p aiuc-app
+      - run: cargo test -p aiuc-app --lib
 
   ui:
     name: Widget UI
@@ -85,6 +104,13 @@ jobs:
           node-version: 22
       - run: npm ci --prefix ui
       - run: npm run build --prefix ui
+      # Every view and scenario renders without errors or overflow; main flows click through.
+      - run: npx playwright install --with-deps chromium
+        working-directory: ui
+      - run: npm run test:e2e
+        working-directory: ui
+        env:
+          CI: "1"
 
   api:
     name: API tests
