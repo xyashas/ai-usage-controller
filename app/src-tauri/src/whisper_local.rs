@@ -236,11 +236,9 @@ pub fn transcribe_wav(wav_path: &Path, on_status: &dyn Fn(&str)) -> Result<Strin
     let mut tokens = vec![sot, no_ts];
     let max_tokens = 224usize;
     for i in 0..max_tokens {
-        let input = if i == 0 {
-            Tensor::new(tokens.as_slice(), &device)
-        } else {
-            Tensor::new(&[*tokens.last().unwrap_or(&eot)], &device)
-        }
+        // candle's Whisper TextDecoder slices positional_embedding from 0..seq_len
+        // and only caches encoder cross-attention (xa), so pass the full token sequence each step.
+        let input = Tensor::new(tokens.as_slice(), &device)
         .map_err(|e| format!("Token tensor error: {e}"))?
         .unsqueeze(0)
         .map_err(|e| format!("Unsqueeze error: {e}"))?;
